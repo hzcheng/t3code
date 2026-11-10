@@ -1271,7 +1271,12 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     onlineEnvironmentIds: new Set(connectedEnvironmentIds),
     environmentLabelById,
   });
-  const railActivityByProjectKey = buildProjectRailActivity({ groups: scopeGroups, threads });
+  // The dot speaks for rows the sidebar actually lists; threads shown under a
+  // parent (subagents, delegated children) stay out of the count.
+  const railActivityByProjectKey = buildProjectRailActivity({
+    groups: scopeGroups,
+    threads: filterSidebarV2VisibleThreads(threads, null, delegatedUnderParent),
+  });
   const railSelectionByProjectKey = buildProjectRailSelection({
     selectedProjectKeys: chosenProjectScopeKeys,
   });
