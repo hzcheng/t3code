@@ -688,16 +688,12 @@ export function useComposerSend(input: ComposerSendInput) {
       composerPreviewAnnotations.length === 0 &&
       composerReviewComments.length === 0 &&
       composerThreadContexts.length === 0 &&
-      composerEnvironmentContexts.length === 0;
-    if (
-      freshSessionAvailable &&
-      composerHoldsOnlyText &&
-      isClearComposerCommand(draftPrompt.trim())
-    ) {
+      composerEnvironmentContexts.length === 0 &&
+      replyTo === null;
+    if (freshSessionAvailable && composerHoldsOnlyText && isClearComposerCommand(trimmed)) {
       armFreshSession(routeThreadKey);
       promptRef.current = "";
       clearComposerDraftContent(composerDraftTarget);
-      if (replyTo) useComposerDraftStore.getState().setReplyTo(composerDraftTarget, replyTo);
       composerRef.current?.resetCursorState();
       return;
     }
