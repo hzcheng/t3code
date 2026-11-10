@@ -117,6 +117,7 @@ import {
   buildProjectRailActivity,
   buildProjectRailEntries,
   buildProjectRailSelection,
+  resolveAdjacentProjectKey,
 } from "./ProjectRail.logic";
 import {
   getThreadKeysToDeselectAfterDelete,
@@ -2988,8 +2989,50 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
         return;
       }
       const jumpIndex = threadJumpIndexFromCommand(command ?? "");
-      if (jumpIndex === null) return;
-      navigateToThreadKey(orderedThreadKeys[jumpIndex] ?? null);
+      if (jumpIndex !== null) {
+        navigateToThreadKey(orderedThreadKeys[jumpIndex] ?? null);
+        return;
+      }
+      const projectDirection =
+        command === "project.next"
+          ? ("next" as const)
+          : command === "project.previous"
+            ? ("previous" as const)
+            : null;
+      if (projectDirection === null) return;
+      const routeProjectKey = routeDraftThread
+        ? `${routeDraftThread.environmentId}:${routeDraftThread.projectId}`
+        : routeThreadRef
+          ? (() => {
+              const shell = threads.find(
+                (thread) =>
+                  thread.environmentId === routeThreadRef.environmentId &&
+                  thread.id === routeThreadRef.threadId,
+              );
+              return shell ? `${shell.environmentId}:${shell.projectId}` : null;
+            })()
+          : null;
+      const anchorProjectKey =
+        chosenProjectScopeKeys.length === 1
+          ? chosenProjectScopeKeys[0]!
+          : routeProjectKey !== null
+            ? (railEntries.find((entry) =>
+                entry.group.memberProjectRefs.some(
+                  (projectRef) =>
+                    `${projectRef.environmentId}:${projectRef.projectId}` === routeProjectKey,
+                ),
+              )?.group.projectKey ?? null)
+            : null;
+      const targetProjectKey = resolveAdjacentProjectKey({
+        projectKeys: railEntries.map((entry) => entry.group.projectKey),
+        currentProjectKey: anchorProjectKey,
+        direction: projectDirection,
+      });
+      const targetEntry = railEntries.find((entry) => entry.group.projectKey === targetProjectKey);
+      if (!targetEntry) return;
+      event.preventDefault();
+      event.stopPropagation();
+      openProjectGroupFromRail(targetEntry.group, false);
     };
     window.addEventListener("keydown", onWindowKeyDown);
     return () => window.removeEventListener("keydown", onWindowKeyDown);
@@ -3000,6 +3043,12 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     routeRowThreadKey,
     routeThreadRef,
     threadByKey,
+    chosenProjectScopeKeys,
+    openProjectGroupFromRail,
+    railEntries,
+    routeDraftThread,
+    routeThreadRef,
+    threads,
   ]);
 
   const showJumpHints = useThreadJumpHintsVisible(keybindings, routeThreadRef);

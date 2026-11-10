@@ -60,6 +60,19 @@ describe("linked pull request thread navigation", () => {
 });
 
 describe("reduceCommandPaletteUiState", () => {
+  it("opens the project switcher intent in a fresh session", () => {
+    const state = reduceCommandPaletteUiState(
+      { open: false, mode: "command", openIntent: null, session: 3 },
+      { _tag: "OpenSwitchProject" },
+    );
+    expect(state).toEqual({
+      open: true,
+      mode: "command",
+      openIntent: { kind: "switch-project" },
+      session: 4,
+    });
+  });
+
   it("opens PR search from another overlay and replaces an earlier search", () => {
     const first = reduceCommandPaletteUiState(
       { open: true, mode: "files", openIntent: null, session: 0 },

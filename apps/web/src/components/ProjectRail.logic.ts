@@ -168,3 +168,29 @@ export function buildProjectRailSelection(input: {
   const kind: ProjectRailSelection = input.selectedProjectKeys.length > 1 ? "multi" : "single";
   return new Map(input.selectedProjectKeys.map((key) => [key, kind] as const));
 }
+
+export type ProjectRailDirection = "previous" | "next";
+
+/**
+ * Keyboard cycling through the rail's projects, wrapping at both ends. With no
+ * anchor (sidebar showing all projects), next starts at the first icon and
+ * previous at the last.
+ */
+export function resolveAdjacentProjectKey(input: {
+  readonly projectKeys: readonly string[];
+  readonly currentProjectKey: string | null;
+  readonly direction: ProjectRailDirection;
+}): string | null {
+  const count = input.projectKeys.length;
+  if (count === 0) return null;
+  const currentIndex = input.currentProjectKey
+    ? input.projectKeys.indexOf(input.currentProjectKey)
+    : -1;
+  if (currentIndex === -1) {
+    return input.direction === "next"
+      ? (input.projectKeys[0] ?? null)
+      : (input.projectKeys[count - 1] ?? null);
+  }
+  const offset = input.direction === "next" ? 1 : -1;
+  return input.projectKeys[(currentIndex + offset + count) % count] ?? null;
+}

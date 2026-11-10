@@ -56,6 +56,7 @@ import {
 import { useLocation, useNavigate } from "@tanstack/react-router";
 import {
   ArrowLeftIcon,
+  ArrowLeftRightIcon,
   BugIcon,
   ChartNoAxesColumnIcon,
   CheckIcon,
@@ -278,6 +279,7 @@ import { threadRecentUse } from "@t3tools/shared/paletteSearch";
 const EMPTY_BROWSE_ENTRIES: FilesystemBrowseResult["entries"] = [];
 const ADD_PROJECT_ENTRY_GROUP = "add-project";
 const NEW_THREAD_IN_GROUP = "projects";
+const SWITCH_PROJECT_GROUP = "switch-project";
 
 /** The submenu an open intent starts in; its groups resolve while rendering. */
 function openIntentView(intent: CommandPaletteOpenIntent | null): CommandPaletteView | null {
@@ -291,6 +293,11 @@ function openIntentView(intent: CommandPaletteOpenIntent | null): CommandPalette
       return {
         addonIcon: <SquarePenIcon className={ADDON_ICON_CLASS} />,
         groups: [{ value: NEW_THREAD_IN_GROUP, label: "Projects", items: [] }],
+      };
+    case "switch-project":
+      return {
+        addonIcon: <ArrowLeftRightIcon className={ADDON_ICON_CLASS} />,
+        groups: [{ value: SWITCH_PROJECT_GROUP, label: "Switch to project", items: [] }],
       };
     case "change-theme":
       return {
@@ -1800,11 +1807,19 @@ function OpenCommandPaletteDialog(props: {
                 items: projectThreadItems.length > 0 ? projectThreadItems : [addProjectAction],
               },
             ]
-          : currentView?.groups[0]?.value === "themes"
-            ? changeThemeItem.groups
-            : currentView?.groups[0]?.value === "appearance"
-              ? changeAppearanceItem.groups
-              : (currentView?.groups ?? rootGroups);
+          : currentView?.groups[0]?.value === SWITCH_PROJECT_GROUP
+            ? [
+                {
+                  value: SWITCH_PROJECT_GROUP,
+                  label: "Switch to project",
+                  items: projectSearchItems.length > 0 ? projectSearchItems : [addProjectAction],
+                },
+              ]
+            : currentView?.groups[0]?.value === "themes"
+              ? changeThemeItem.groups
+              : currentView?.groups[0]?.value === "appearance"
+                ? changeAppearanceItem.groups
+                : (currentView?.groups ?? rootGroups);
 
   const isLinkedThreadSearch =
     linkedThreadSearch?.linkedThreads !== undefined && deferredQuery === linkedThreadSearch.query;

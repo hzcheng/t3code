@@ -5,6 +5,7 @@ import {
   buildProjectRailActivity,
   buildProjectRailEntries,
   buildProjectRailSelection,
+  resolveAdjacentProjectKey,
   type ProjectRailGroupShape,
   type ProjectRailThreadInput,
 } from "./ProjectRail.logic";
@@ -191,5 +192,51 @@ describe("buildProjectRailSelection", () => {
     const multi = buildProjectRailSelection({ selectedProjectKeys: ["a", "b"] });
     expect(multi.get("a")).toBe("multi");
     expect(multi.get("b")).toBe("multi");
+  });
+});
+
+describe("resolveAdjacentProjectKey", () => {
+  const keys = ["a", "b", "c"];
+
+  it("steps forward and backward through the rail order", () => {
+    expect(
+      resolveAdjacentProjectKey({ projectKeys: keys, currentProjectKey: "a", direction: "next" }),
+    ).toBe("b");
+    expect(
+      resolveAdjacentProjectKey({
+        projectKeys: keys,
+        currentProjectKey: "b",
+        direction: "previous",
+      }),
+    ).toBe("a");
+  });
+
+  it("wraps at both ends", () => {
+    expect(
+      resolveAdjacentProjectKey({ projectKeys: keys, currentProjectKey: "c", direction: "next" }),
+    ).toBe("a");
+    expect(
+      resolveAdjacentProjectKey({
+        projectKeys: keys,
+        currentProjectKey: "a",
+        direction: "previous",
+      }),
+    ).toBe("c");
+  });
+
+  it("starts at the first or last icon without an anchor", () => {
+    expect(
+      resolveAdjacentProjectKey({ projectKeys: keys, currentProjectKey: null, direction: "next" }),
+    ).toBe("a");
+    expect(
+      resolveAdjacentProjectKey({
+        projectKeys: keys,
+        currentProjectKey: "missing",
+        direction: "previous",
+      }),
+    ).toBe("c");
+    expect(
+      resolveAdjacentProjectKey({ projectKeys: [], currentProjectKey: null, direction: "next" }),
+    ).toBeNull();
   });
 });
