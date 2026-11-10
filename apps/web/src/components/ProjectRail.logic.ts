@@ -61,7 +61,7 @@ export function buildProjectRailEntries<TGroup extends ProjectRailGroupShape>(in
   }));
 }
 
-export type ProjectRailActivity = "attention" | "working" | null;
+export type ProjectRailActivity = "attention" | "working" | "done" | null;
 
 export interface ProjectRailThreadInput {
   readonly environmentId: EnvironmentId;
@@ -73,6 +73,22 @@ export interface ProjectRailThreadInput {
   readonly pendingSubagentRequest?: string | null | undefined;
   readonly runtime: { readonly status: string } | null;
   readonly blockedOnThreadWait?: boolean | undefined;
+  readonly latestRun: { readonly completedAt: string | null } | null;
+  readonly lastVisitedAt?: string | null | undefined;
+}
+
+// Mirrors hasUnseenCompletion in Sidebar.logic.ts: completions only count once
+// the thread was visited at least once.
+function hasUnseenCompletion(
+  thread: Pick<ProjectRailThreadInput, "latestRun" | "lastVisitedAt">,
+): boolean {
+  if (!thread.latestRun?.completedAt) return false;
+  const completedAt = Date.parse(thread.latestRun.completedAt);
+  if (Number.isNaN(completedAt)) return false;
+  if (!thread.lastVisitedAt) return false;
+  const lastVisitedAt = Date.parse(thread.lastVisitedAt);
+  if (Number.isNaN(lastVisitedAt)) return true;
+  return completedAt > lastVisitedAt;
 }
 
 function classifyRailThread(
@@ -83,6 +99,8 @@ function classifyRailThread(
     | "pendingSubagentRequest"
     | "runtime"
     | "blockedOnThreadWait"
+    | "latestRun"
+    | "lastVisitedAt"
   >,
 ): Exclude<ProjectRailActivity, null> | null {
   if (
@@ -103,12 +121,14 @@ function classifyRailThread(
   ) {
     return "working";
   }
+  if (hasUnseenCompletion(thread)) return "done";
   return null;
 }
 
 /**
- * One dot per rail icon: amber while any of the project's threads waits on the
- * user (approval or input), sky while any is actively working.
+ * One dot per rail icon, highest priority first: amber while any thread waits
+ * on the user (approval or input), sky while any is working, green for a
+ * completed run nobody has opened since.
  */
 export function buildProjectRailActivity(input: {
   readonly groups: readonly ProjectRailGroupShape[];
@@ -129,9 +149,12 @@ export function buildProjectRailActivity(input: {
     if (thread.archivedAt !== null || thread.deletedAt !== null) continue;
     const projectKey = projectKeyByPhysicalKey.get(`${thread.environmentId}:${thread.projectId}`);
     if (projectKey === undefined) continue;
-    if (activityByProjectKey.get(projectKey) === "attention") continue;
     const activity = classifyRailThread(thread);
     if (activity === null) continue;
+    const current = activityByProjectKey.get(projectKey);
+    if (current === "attention" || (current === "working" && activity !== "attention")) {
+      continue;
+    }
     activityByProjectKey.set(projectKey, activity);
   }
   return activityByProjectKey;

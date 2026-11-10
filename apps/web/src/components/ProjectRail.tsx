@@ -17,11 +17,13 @@ import { Tooltip, TooltipPopup, TooltipProvider, TooltipTrigger } from "./ui/too
 const ACTIVITY_DOT_CLASS: Record<Exclude<ProjectRailActivity, null>, string> = {
   attention: "bg-warning",
   working: "bg-info",
+  done: "bg-success",
 };
 
 const ACTIVITY_TOOLTIP: Record<Exclude<ProjectRailActivity, null>, string> = {
   attention: "Waiting on you",
   working: "Working",
+  done: "Finished, not yet viewed",
 };
 
 function railTooltip(entry: RailEntry, activity: ProjectRailActivity): string {

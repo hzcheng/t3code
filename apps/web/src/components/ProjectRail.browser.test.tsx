@@ -87,6 +87,23 @@ it("opens a project on click and toggles multi-select on shift-click", async () 
   expect(onOpenGroup.mock.calls[1]?.[1]).toBe(true);
 });
 
+it("renders the unseen-completion dot", async () => {
+  const entries = makeEntries();
+  await using screen = await render(
+    <ProjectRail
+      entries={entries}
+      activityByProjectKey={new Map([[entries[0]!.group.projectKey, "done"]])}
+      selectionByProjectKey={new Map()}
+      allProjectsSelected
+      onOpenAllProjects={vi.fn()}
+      onOpenGroup={vi.fn()}
+      onAddProject={vi.fn()}
+    />,
+  );
+  const button = await screen.getByRole("button", { name: /Local app/ }).element();
+  await expect.element(button.querySelector<HTMLElement>(".bg-success")).toBeInTheDocument();
+});
+
 it("disables icons whose machine is offline and keeps the all-projects entry", async () => {
   const entries = makeEntries({ onlineEnvironmentIds: new Set([localEnvironmentId]) });
   const onOpenGroup = vi.fn();

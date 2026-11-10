@@ -43,6 +43,7 @@ function makeThread(overrides: Partial<ProjectRailThreadInput> = {}): ProjectRai
     hasPendingApprovals: false,
     hasPendingUserInput: false,
     runtime: null,
+    latestRun: null,
     ...overrides,
   };
 }
@@ -122,6 +123,51 @@ describe("buildProjectRailActivity", () => {
       threads: [makeThread({ runtime: { status: "running" }, blockedOnThreadWait: true })],
     });
     expect(activity.get("alpha")).toBeUndefined();
+  });
+
+  it("flags a run completed after the last visit as done", () => {
+    const activity = buildProjectRailActivity({
+      groups,
+      threads: [
+        makeThread({
+          latestRun: { completedAt: "2026-01-02T00:00:00Z" },
+          lastVisitedAt: "2026-01-01T00:00:00Z",
+        }),
+      ],
+    });
+    expect(activity.get("alpha")).toBe("done");
+  });
+
+  it("does not flag completions already seen or never visitable", () => {
+    const activity = buildProjectRailActivity({
+      groups,
+      threads: [
+        makeThread({
+          latestRun: { completedAt: "2026-01-01T00:00:00Z" },
+          lastVisitedAt: "2026-01-02T00:00:00Z",
+        }),
+        makeThread({
+          projectId: ProjectId.make("alpha-0"),
+          latestRun: { completedAt: "2026-01-03T00:00:00Z" },
+          lastVisitedAt: null,
+        }),
+      ],
+    });
+    expect(activity.get("alpha")).toBeUndefined();
+  });
+
+  it("prefers working over done within one project", () => {
+    const activity = buildProjectRailActivity({
+      groups,
+      threads: [
+        makeThread({
+          latestRun: { completedAt: "2026-01-02T00:00:00Z" },
+          lastVisitedAt: "2026-01-01T00:00:00Z",
+        }),
+        makeThread({ runtime: { status: "running" } }),
+      ],
+    });
+    expect(activity.get("alpha")).toBe("working");
   });
 
   it("ignores archived threads and threads outside the rail's projects", () => {
