@@ -1337,12 +1337,18 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     (group: SidebarProjectSnapshot, position: { x: number; y: number }) => {
       const api = readLocalApi();
       if (!api) return;
+      const newThreadShortcut = shortcutLabelForCommand(keybindings, "chat.new");
       void (async () => {
         const clicked = await settlePromise(() =>
           api.contextMenu.show(
             [
-              { id: "new-thread", label: "New thread" },
-              { id: "copy-path", label: "Copy path" },
+              {
+                id: "new-thread",
+                label: "New thread",
+                icon: "pencil",
+                ...(newThreadShortcut ? { detail: newThreadShortcut } : {}),
+              },
+              { id: "copy-path", label: "Copy path", icon: "copy" },
               ...(canPinProject(group)
                 ? [
                     group.pinned

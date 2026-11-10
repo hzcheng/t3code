@@ -29,6 +29,9 @@ export interface ContextMenuItem<T extends string = string> {
   disabled?: boolean;
   header?: boolean;
   icon?: string;
+  /** Electron accelerator form ("CommandOrControl+N"); native menus display and
+   * handle it, the web fallback renders it as a shortcut hint. */
+  shortcut?: string;
   separatorBefore?: boolean;
   checked?: boolean;
   children?: readonly ContextMenuItem<T>[];
