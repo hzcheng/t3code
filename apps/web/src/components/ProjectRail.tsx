@@ -42,6 +42,7 @@ interface ProjectRailProps {
   readonly allProjectsSelected: boolean;
   readonly onOpenAllProjects: () => void;
   readonly onOpenGroup: (entry: RailEntry, additive: boolean) => void;
+  readonly onGroupContextMenu: (entry: RailEntry, position: { x: number; y: number }) => void;
   readonly onAddProject: () => void;
 }
 
@@ -100,6 +101,13 @@ export const ProjectRail = memo(function ProjectRail(input: ProjectRailProps) {
                       onClick={(event) =>
                         input.onOpenGroup(entry, event.shiftKey || event.metaKey || event.ctrlKey)
                       }
+                      onContextMenu={(event) => {
+                        event.preventDefault();
+                        input.onGroupContextMenu(entry, {
+                          x: event.clientX,
+                          y: event.clientY,
+                        });
+                      }}
                       className={cn(
                         "relative flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-xl transition-colors hover:bg-sidebar-row-hover disabled:cursor-default disabled:opacity-40 disabled:hover:bg-transparent",
                         selection === "single" && "ring-2 ring-primary",

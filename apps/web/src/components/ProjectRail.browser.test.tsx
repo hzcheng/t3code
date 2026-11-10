@@ -72,6 +72,7 @@ it("opens a project on click and toggles multi-select on shift-click", async () 
       allProjectsSelected
       onOpenAllProjects={vi.fn()}
       onOpenGroup={onOpenGroup}
+      onGroupContextMenu={vi.fn()}
       onAddProject={vi.fn()}
     />,
   );
@@ -97,6 +98,7 @@ it("renders the unseen-completion dot", async () => {
       allProjectsSelected
       onOpenAllProjects={vi.fn()}
       onOpenGroup={vi.fn()}
+      onGroupContextMenu={vi.fn()}
       onAddProject={vi.fn()}
     />,
   );
@@ -118,6 +120,7 @@ it("disables icons whose machine is offline and keeps the all-projects entry", a
       allProjectsSelected={false}
       onOpenAllProjects={onOpenAllProjects}
       onOpenGroup={onOpenGroup}
+      onGroupContextMenu={vi.fn()}
       onAddProject={vi.fn()}
     />,
   );
@@ -131,4 +134,29 @@ it("disables icons whose machine is offline and keeps the all-projects entry", a
   await userEvent.click(screen.getByRole("button", { name: "All projects" }));
   expect(onOpenAllProjects).toHaveBeenCalledTimes(1);
   expect(onOpenGroup).not.toHaveBeenCalled();
+});
+
+it("opens the project context menu on right-click", async () => {
+  const entries = makeEntries();
+  const onGroupContextMenu = vi.fn();
+  await using screen = await render(
+    <ProjectRail
+      entries={entries}
+      activityByProjectKey={new Map()}
+      selectionByProjectKey={new Map()}
+      allProjectsSelected
+      onOpenAllProjects={vi.fn()}
+      onOpenGroup={vi.fn()}
+      onGroupContextMenu={onGroupContextMenu}
+      onAddProject={vi.fn()}
+    />,
+  );
+
+  const button = await screen.getByRole("button", { name: /Remote app/ }).element();
+  button.dispatchEvent(
+    new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 40, clientY: 120 }),
+  );
+  expect(onGroupContextMenu).toHaveBeenCalledTimes(1);
+  expect(onGroupContextMenu.mock.calls[0]?.[0].group.displayName).toBe("Remote app");
+  expect(onGroupContextMenu.mock.calls[0]?.[1]).toEqual({ x: 40, y: 120 });
 });

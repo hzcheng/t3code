@@ -3047,6 +3047,9 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
               allProjectsSelected={chosenProjectScopeKeys.length === 0}
               onOpenAllProjects={() => setProjectScopeKeys([])}
               onOpenGroup={(entry, additive) => openProjectGroupFromRail(entry.group, additive)}
+              onGroupContextMenu={(entry, position) =>
+                handleProjectFolderContextMenu(entry.group, position)
+              }
               onAddProject={openAddProjectCommandPalette}
             />
           ) : null}
