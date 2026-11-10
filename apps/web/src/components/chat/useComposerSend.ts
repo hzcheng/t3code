@@ -689,10 +689,15 @@ export function useComposerSend(input: ComposerSendInput) {
       composerReviewComments.length === 0 &&
       composerThreadContexts.length === 0 &&
       composerEnvironmentContexts.length === 0;
-    if (freshSessionAvailable && composerHoldsOnlyText && isClearComposerCommand(trimmed)) {
+    if (
+      freshSessionAvailable &&
+      composerHoldsOnlyText &&
+      isClearComposerCommand(draftPrompt.trim())
+    ) {
       armFreshSession(routeThreadKey);
       promptRef.current = "";
       clearComposerDraftContent(composerDraftTarget);
+      if (replyTo) useComposerDraftStore.getState().setReplyTo(composerDraftTarget, replyTo);
       composerRef.current?.resetCursorState();
       return;
     }
@@ -1355,15 +1360,26 @@ export function useComposerSend(input: ComposerSendInput) {
         });
         // The restored draft clones its images, so the sent copies are no longer used.
         optimisticBlobPreviews.release(optimisticMessage);
-        const retryComposerImages = restoreComposerDraft(composerDraftTarget, sendSnapshot);
+        const replyPrefix = replyTo ? formatAssistantCitationForComposer(replyTo).trim() : "";
+        const restoredPrompt =
+          replyTo && messageTextForSend.startsWith(replyPrefix)
+            ? messageTextForSend.slice(replyPrefix.length).trimStart()
+            : messageTextForSend;
+        const retryComposerImages = restoreComposerDraft(composerDraftTarget, {
+          ...sendSnapshot,
+          messageText: restoredPrompt,
+        });
+        if (restoredPrompt !== messageTextForSend) {
+          useComposerDraftStore.getState().setReplyTo(composerDraftTarget, replyTo);
+        }
         if (currentRouteThreadKeyRef.current === routeThreadKey) {
-          promptRef.current = messageTextForSend;
+          promptRef.current = restoredPrompt;
           composerImagesRef.current = retryComposerImages;
           composerFilesRef.current = composerFilesSnapshot;
           composerTerminalContextsRef.current = composerTerminalContextsSnapshot;
           composerRef.current?.resetCursorState({
-            cursor: collapseExpandedComposerCursor(messageTextForSend, messageTextForSend.length),
-            prompt: messageTextForSend,
+            cursor: collapseExpandedComposerCursor(restoredPrompt, restoredPrompt.length),
+            prompt: restoredPrompt,
             detectTrigger: true,
           });
         }
