@@ -3177,6 +3177,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
   const newThreadInProjectShortcutLabel = shortcutLabelForCommand(keybindings, "chat.newLocal");
   return (
     <SidebarFolderDrop>
+      <SidebarChromeHeader isElectron={isElectron} />
       <div className="flex min-h-0 min-w-0 flex-1 flex-row">
         {!isMobile ? (
           <ProjectRail
@@ -3196,7 +3197,6 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
           />
         ) : null}
         <div className="flex min-w-0 flex-1 flex-col">
-          <SidebarChromeHeader isElectron={isElectron} />
           <SidebarContent
             ref={sidebarContentRef}
             className="min-h-full"
@@ -3905,9 +3905,9 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
               ) : null}
             </SidebarGroup>
           </SidebarContent>
-          <SidebarChromeFooter />
         </div>
       </div>
+      <SidebarChromeFooter />
     </SidebarFolderDrop>
   );
 }
