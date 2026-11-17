@@ -16,6 +16,7 @@ import { useEnvironmentShellHasSnapshot } from "../../state/shell";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { useOrchestrationCommand } from "../../state/use-orchestration-command";
 import { reportProjectFailure } from "../../hooks/useProjectGroupUpdate";
+import { useProjectRailStore } from "../../projectRailStore";
 
 export function DesktopAppActivationCoordinator() {
   const primaryEnvironment = usePrimaryEnvironment();
@@ -70,6 +71,7 @@ export function DesktopAppActivationCoordinator() {
           const error = squashAtomCommandFailure(result);
           throw error instanceof Error ? error : new Error("T3 Code could not add the project.");
         }
+        useProjectRailStore.getState().setVisible([{ environmentId, projectId }], true);
         return projectId;
       },
       waitForProject: async (projectRef) => {

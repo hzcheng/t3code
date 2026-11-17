@@ -129,6 +129,7 @@ import { useScratchProject } from "../hooks/useScratchProject";
 import { useStartTriage } from "../hooks/useStartTriage";
 import { pickTriageEnvironment } from "../lib/triageTarget";
 import { useNewProject } from "../hooks/useNewProject";
+import { useProjectRailStore } from "../projectRailStore";
 import { useOrderWhileOpen } from "../hooks/useOrderWhileOpen";
 import { reportProjectFailure, useProjectPin } from "../hooks/useProjectGroupUpdate";
 import {
@@ -1987,6 +1988,9 @@ function OpenCommandPaletteDialog(props: {
       return;
     }
 
+    useProjectRailStore
+      .getState()
+      .setVisible([scopeProjectRef(input.environmentId, projectId)], true);
     const navigationResult = await settlePromise(() =>
       handleNewThread(scopeProjectRef(input.environmentId, projectId)),
     );

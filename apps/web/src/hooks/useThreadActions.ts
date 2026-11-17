@@ -30,6 +30,7 @@ import { environmentServerConfigsAtom } from "../state/server";
 import { isScratchProject } from "@t3tools/client-runtime/state/projects";
 import { orchestrationEnvironment } from "../state/orchestration";
 import { projectEnvironment } from "../state/projects";
+import { useProjectRailStore } from "../projectRailStore";
 import { threadEnvironment } from "../state/threads";
 import { vcsEnvironment } from "../state/vcs";
 import { useNewThreadHandler } from "./useHandleNewThread";
@@ -1005,10 +1006,20 @@ export function useThreadActions() {
     reorderActiveThread,
     markThreadUnread,
     setThreadAutoSettle,
-    turnThreadIntoProject: (target: ScopedThreadRef) =>
-      createProjectFromThread({
+    turnThreadIntoProject: async (target: ScopedThreadRef) => {
+      const result = await createProjectFromThread({
         environmentId: target.environmentId,
         input: { threadId: target.threadId },
-      }),
+      });
+      if (result._tag === "Success") {
+        useProjectRailStore
+          .getState()
+          .setVisible(
+            [{ environmentId: target.environmentId, projectId: result.value.projectId }],
+            true,
+          );
+      }
+      return result;
+    },
   };
 }

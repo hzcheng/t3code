@@ -1,7 +1,8 @@
 import { createEnvironmentProjectAtoms } from "@t3tools/client-runtime/state/projects";
 import { createProjectEnvironmentAtoms } from "@t3tools/client-runtime/state/projects";
 import { createEnvironmentRpcQueryAtomFamily } from "@t3tools/client-runtime/state/runtime";
-import { WS_METHODS } from "@t3tools/contracts";
+import { WS_METHODS, type EnvironmentId } from "@t3tools/contracts";
+import { enabledEnvironmentIds } from "@t3tools/client-runtime/state/connections";
 
 import { environmentCatalog } from "../connection/catalog";
 import { connectionAtomRuntime } from "../connection/runtime";
@@ -16,6 +17,22 @@ export const environmentProjects = createEnvironmentProjectAtoms({
   snapshotAtom: environmentSnapshotAtom,
   serverConfigValueAtom: serverEnvironment.configValueAtom,
 });
+let previousSnapshotEnvironmentIds: readonly EnvironmentId[] = [];
+export const projectSnapshotEnvironmentIdsAtom = Atom.make((get) => {
+  const ids = [...enabledEnvironmentIds(get(environmentCatalog.catalogValueAtom))].filter(
+    (id) =>
+      get(environmentShell.hasSnapshotAtom(id)) &&
+      get(serverEnvironment.configValueAtom(id)) !== null,
+  );
+  if (
+    ids.length === previousSnapshotEnvironmentIds.length &&
+    ids.every((id, index) => id === previousSnapshotEnvironmentIds[index])
+  )
+    return previousSnapshotEnvironmentIds;
+  previousSnapshotEnvironmentIds = ids;
+  return ids;
+}).pipe(Atom.withLabel("web-project-snapshot-environment-ids"));
+
 export const projectEnvironment = createProjectEnvironmentAtoms(connectionAtomRuntime, {
   projectAtom: environmentProjects.projectAtom,
 });

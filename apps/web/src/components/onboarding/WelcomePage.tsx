@@ -86,6 +86,7 @@ import { useEnvironments, usePrimaryEnvironmentId } from "../../state/environmen
 import { managedTelemetryOffMessage, useManagedPolicy } from "../../state/managedPolicy";
 import { useProjectScans } from "../../onboarding/useProjectScans";
 import { projectEnvironment } from "../../state/projects";
+import { useProjectRailStore } from "../../projectRailStore";
 import { serverEnvironment } from "../../state/server";
 import {
   readEnvironmentScope,
@@ -1544,6 +1545,9 @@ function useProjectImport({
             }
             continue;
           }
+          useProjectRailStore
+            .getState()
+            .setVisible([scopeProjectRef(environmentId, projectId)], true);
         }
 
         if (!hasAccess()) {

@@ -16,6 +16,7 @@ import { sourceControlEnvironment } from "~/state/sourceControl";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { useNewThreadHandler } from "./useHandleNewThread";
 import { suggestAppAccessForRemote } from "../components/sourceControlAppAccessToast";
+import { useProjectRailStore } from "../projectRailStore";
 
 function errorMessage(error: unknown): string {
   return error instanceof Error && error.message.trim().length > 0
@@ -110,6 +111,7 @@ export function useNewProject() {
     }
 
     const projectRef = scopeProjectRef(input.environmentId, projectId);
+    useProjectRailStore.getState().setVisible([projectRef], true);
     // Wait for the stored project path; drafts use it as their key.
     const project = await waitForProject(projectRef).catch((error: unknown) => {
       toastManager.add(
