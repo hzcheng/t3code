@@ -1,13 +1,37 @@
+import "../index.css";
 import { EnvironmentId, ProjectId } from "@t3tools/contracts";
 import { expect, it, vi } from "vite-plus/test";
 import { userEvent } from "vite-plus/test/browser";
+import { useState } from "react";
 
 import { render } from "../../test/render";
 import {
   buildSidebarProjectSnapshots,
   type SidebarProjectSnapshot,
 } from "../sidebarProjectGrouping";
-import { ProjectRail } from "./ProjectRail";
+import { ProjectRail as ProjectRailView } from "./ProjectRail";
+
+function ProjectRail(
+  props: Omit<Parameters<typeof ProjectRailView>[0], "visibleProjectKeys" | "onVisibilityChange">,
+) {
+  const [visible, setVisible] = useState(() => new Set(props.entries.map((entry) => entry.key)));
+  return (
+    <ProjectRailView
+      {...props}
+      visibleProjectKeys={visible}
+      onVisibilityChange={(entries, shown) => {
+        setVisible((previous) => {
+          const next = new Set(previous);
+          for (const entry of entries) {
+            if (shown) next.add(entry.key);
+            else next.delete(entry.key);
+          }
+          return next;
+        });
+      }}
+    />
+  );
+}
 import {
   buildProjectRailEntries,
   buildProjectRailSelection,
@@ -34,11 +58,15 @@ function makeProject(environmentId: EnvironmentId, id: string, title: string) {
   };
 }
 
-function makeEntries(input?: { onlineEnvironmentIds?: ReadonlySet<EnvironmentId> }) {
+function makeEntries(input?: {
+  onlineEnvironmentIds?: ReadonlySet<EnvironmentId>;
+  additionalProjects?: ReturnType<typeof makeProject>[];
+}) {
   const groups: SidebarProjectSnapshot[] = buildSidebarProjectSnapshots({
     projects: [
       makeProject(localEnvironmentId, "rail-project-local", "Local app"),
       makeProject(remoteEnvironmentId, "rail-project-remote", "Remote app"),
+      ...(input?.additionalProjects ?? []),
     ],
     settings: { sidebarProjectGroupingMode: "separate", sidebarProjectGroupingOverrides: {} },
     primaryEnvironmentId: localEnvironmentId,
@@ -50,6 +78,7 @@ function makeEntries(input?: { onlineEnvironmentIds?: ReadonlySet<EnvironmentId>
     onlineEnvironmentIds:
       input?.onlineEnvironmentIds ?? new Set([localEnvironmentId, remoteEnvironmentId]),
     environmentLabelById,
+    sessionProjectRefs: [],
   });
 }
 
@@ -93,7 +122,7 @@ it("renders the unseen-completion dot", async () => {
   await using screen = await render(
     <ProjectRail
       entries={entries}
-      activityByProjectKey={new Map([[entries[0]!.group.projectKey, "done"]])}
+      activityByProjectKey={new Map([[entries[0]!.key, "done"]])}
       selectionByProjectKey={new Map()}
       allProjectsSelected
       onOpenAllProjects={vi.fn()}
@@ -116,6 +145,12 @@ it("disables icons whose machine is offline and keeps the all-projects entry", a
       activityByProjectKey={new Map()}
       selectionByProjectKey={buildProjectRailSelection({
         selectedProjectKeys: entries.map((entry) => entry.group.projectKey),
+        entries: entries.map((entry) => ({
+          key: entry.key,
+          environmentId: entry.environmentId,
+          projectKey: entry.group.projectKey,
+          isScratch: entry.group.isScratch,
+        })),
       })}
       allProjectsSelected={false}
       onOpenAllProjects={onOpenAllProjects}
@@ -133,6 +168,142 @@ it("disables icons whose machine is offline and keeps the all-projects entry", a
   );
   await userEvent.click(screen.getByRole("button", { name: "All projects" }));
   expect(onOpenAllProjects).toHaveBeenCalledTimes(1);
+  expect(onOpenGroup).not.toHaveBeenCalled();
+  await userEvent.click(screen.getByRole("button", { name: "All projects on Build box" }));
+  const visibility = screen.getByRole("checkbox", { name: "Show Remote app in project rail" });
+  await expect.element(visibility).toBeEnabled();
+  await userEvent.click(visibility);
+  await expect.element(visibility).not.toBeChecked();
+});
+
+it("edits multiple visibility checkboxes without closing or changing thread scope", async () => {
+  const entries = makeEntries({
+    additionalProjects: [
+      makeProject(localEnvironmentId, "tools", "Tools"),
+      makeProject(localEnvironmentId, "docs", "Docs"),
+    ],
+  });
+  const onOpenGroup = vi.fn();
+  await using screen = await render(
+    <ProjectRail
+      entries={entries}
+      activityByProjectKey={new Map()}
+      selectionByProjectKey={buildProjectRailSelection({
+        selectedProjectKeys: entries.map((entry) => entry.group.projectKey),
+        entries: entries.map((entry) => ({
+          key: entry.key,
+          environmentId: entry.environmentId,
+          projectKey: entry.group.projectKey,
+          isScratch: entry.group.isScratch,
+        })),
+      })}
+      allProjectsSelected={false}
+      onOpenAllProjects={vi.fn()}
+      onOpenGroup={onOpenGroup}
+      onGroupContextMenu={vi.fn()}
+      onAddProject={vi.fn()}
+    />,
+  );
+  await userEvent.click(screen.getByRole("button", { name: "All projects on This Mac" }));
+  const allProjects = screen.getByRole("checkbox", { name: "Show all projects on This Mac" });
+  await expect.element(allProjects).toBeChecked();
+  await userEvent.fill(
+    screen.getByRole("textbox", { name: "Search projects on This Mac" }),
+    "Tools",
+  );
+  await userEvent.click(allProjects);
+  await expect
+    .element(screen.getByRole("checkbox", { name: "Show Tools in project rail" }))
+    .not.toBeChecked();
+  await expect.element(allProjects).not.toBeChecked();
+  await expect
+    .element(screen.getByRole("button", { name: "Remote app · Build box", exact: true }))
+    .toBeVisible();
+  await userEvent.fill(screen.getByRole("textbox", { name: "Search projects on This Mac" }), "");
+  await expect
+    .element(screen.getByRole("checkbox", { name: "Show Local app in project rail" }))
+    .not.toBeChecked();
+  await expect
+    .element(screen.getByRole("checkbox", { name: "Show Docs in project rail" }))
+    .not.toBeChecked();
+  await userEvent.fill(
+    screen.getByRole("textbox", { name: "Search projects on This Mac" }),
+    "Tools",
+  );
+  await userEvent.click(allProjects);
+  await expect
+    .element(screen.getByRole("checkbox", { name: "Show Tools in project rail" }))
+    .toBeChecked();
+  await expect.element(allProjects).toBeChecked();
+  await userEvent.fill(screen.getByRole("textbox", { name: "Search projects on This Mac" }), "");
+  await expect
+    .element(screen.getByRole("checkbox", { name: "Show Local app in project rail" }))
+    .toBeChecked();
+  await expect
+    .element(screen.getByRole("checkbox", { name: "Show Docs in project rail" }))
+    .toBeChecked();
+  await userEvent.click(screen.getByRole("checkbox", { name: "Show Local app in project rail" }));
+  await expect.element(allProjects).toHaveAttribute("aria-checked", "mixed");
+  await userEvent.click(allProjects);
+  await expect.element(allProjects).toBeChecked();
+  await expect
+    .element(screen.getByRole("checkbox", { name: "Show Local app in project rail" }))
+    .toBeChecked();
+  await userEvent.click(screen.getByRole("checkbox", { name: "Show Local app in project rail" }));
+  await userEvent.click(screen.getByRole("checkbox", { name: "Show Tools in project rail" }));
+  await expect
+    .element(screen.getByRole("checkbox", { name: "Show Local app in project rail" }))
+    .not.toBeChecked();
+  await expect
+    .element(screen.getByRole("checkbox", { name: "Show Tools in project rail" }))
+    .not.toBeChecked();
+  await expect
+    .element(screen.getByRole("button", { name: "Local app · This Mac", exact: true }))
+    .not.toBeInTheDocument();
+  await expect
+    .element(screen.getByRole("button", { name: "All projects on This Mac" }))
+    .toHaveAttribute("aria-pressed", "true");
+  await userEvent.fill(
+    screen.getByRole("textbox", { name: "Search projects on This Mac" }),
+    "Tools",
+  );
+  await userEvent.click(screen.getByRole("checkbox", { name: "Show Tools in project rail" }));
+  await userEvent.fill(screen.getByRole("textbox", { name: "Search projects on This Mac" }), "");
+  await expect
+    .element(screen.getByRole("checkbox", { name: "Show Local app in project rail" }))
+    .not.toBeChecked();
+  await expect
+    .element(screen.getByRole("checkbox", { name: "Show Tools in project rail" }))
+    .toBeChecked();
+  await userEvent.click(screen.getByRole("checkbox", { name: "Show Tools in project rail" }));
+  await userEvent.click(screen.getByRole("checkbox", { name: "Show Docs in project rail" }));
+  await userEvent.click(screen.getByRole("button", { name: "Close project list", exact: true }));
+  await expect
+    .element(screen.getByRole("button", { name: "All projects on This Mac" }))
+    .toBeVisible();
+  await userEvent.click(screen.getByRole("button", { name: "All projects on This Mac" }));
+  await expect
+    .element(screen.getByRole("checkbox", { name: "Show Local app in project rail" }))
+    .not.toBeChecked();
+  await expect
+    .element(screen.getByRole("checkbox", { name: "Show Remote app in project rail" }))
+    .not.toBeInTheDocument();
+  await userEvent.click(screen.getByText("Local app", { exact: true }));
+  await userEvent.click(screen.getByText("Tools", { exact: true }));
+  await expect
+    .element(screen.getByRole("checkbox", { name: "Show Local app in project rail" }))
+    .toBeChecked();
+  await expect
+    .element(screen.getByRole("checkbox", { name: "Show Tools in project rail" }))
+    .toBeChecked();
+  await userEvent.keyboard("{Escape}");
+  await userEvent.click(screen.getByRole("button", { name: "All projects on This Mac" }));
+  await expect
+    .element(screen.getByRole("checkbox", { name: "Show Local app in project rail" }))
+    .toBeChecked();
+  await expect
+    .element(screen.getByRole("checkbox", { name: "Show Tools in project rail" }))
+    .toBeChecked();
   expect(onOpenGroup).not.toHaveBeenCalled();
 });
 

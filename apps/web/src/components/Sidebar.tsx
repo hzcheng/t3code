@@ -9,6 +9,7 @@ import {
 import { discardComposerDraft } from "../lib/discardComposerDraft";
 import { requestCustomSnooze } from "./CustomSnoozeDialog";
 import { useAtomValue } from "@effect/atom-react";
+import { useShallow } from "zustand/react/shallow";
 import * as Option from "effect/Option";
 import { Atom } from "effect/reactivity";
 import * as Schema from "effect/Schema";
@@ -102,17 +103,21 @@ import { readLocalApi } from "../localApi";
 import { configuredHostedAppUrl } from "../hostedPairing";
 import { useSidebarPendingFileDropStore } from "../sidebarPendingFileDropStore";
 import {
+  machineScopedScratchScopeKey,
+  parseMachineScopedScratchScopeKey,
   pickableProjectGroups,
   selectProjectGroupingSettings,
 } from "@t3tools/client-runtime/state/project-grouping";
 import {
   projectGroupsSpanEnvironments,
+  resolveScopedProjectGroups,
   resolveSidebarProjectScopeKeys,
   getSidebarProjectSettingsKey,
   type SidebarProjectSnapshot,
 } from "../sidebarProjectGrouping";
 import { resolveProjectExpanded, useUiStateStore } from "../uiStateStore";
 import { ProjectRail } from "./ProjectRail";
+import { reconcileProjectRailVisibility, useProjectRailStore } from "../projectRailStore";
 import {
   buildProjectRailActivity,
   buildProjectRailEntries,
@@ -155,7 +160,7 @@ import {
 } from "../state/entities";
 import { environmentPresentations } from "../state/presentation";
 import { primaryServerKeybindingsAtom } from "../state/server";
-import { environmentProjects } from "../state/projects";
+import { environmentProjects, projectSnapshotEnvironmentIdsAtom } from "../state/projects";
 import { threadEnvironment } from "../state/threads";
 import { useOlderSettledShelf, useOlderSettledShelfGrowth } from "../state/olderSettledShelf";
 import { useThreadSearch } from "../state/queries";
@@ -1095,9 +1100,12 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     settings: projectGroupingSettings,
     canClearMissingScope: allProjectSnapshotsReady && allProjectConfigsReady,
   }).filter((key) => !archivedProjectKeys.has(key));
-  const chosenProjectGroups = scopeGroups.filter((project) =>
-    chosenProjectScopeKeys.includes(project.projectKey),
-  );
+  const chosenProjectGroups = resolveScopedProjectGroups({
+    groups: scopeGroups,
+    keys: chosenProjectScopeKeys,
+    primaryEnvironmentId,
+    resolveEnvironmentLabel: (environmentId) => environmentLabelById.get(environmentId) ?? null,
+  });
   const chosenScopeProjectKeys =
     chosenProjectGroups.length === 0
       ? null
@@ -1188,7 +1196,12 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     projectScopeKeys.length > 1
       ? null
       : (projectScopeItems.find((item) => item.value === (projectScopeKeys[0] ?? "all")) ??
-        projectScopeItems[0]!);
+        // A machine-qualified scratch scope displays through the logical No project item.
+        (parseMachineScopedScratchScopeKey(projectScopeKeys[0] ?? "") !== null
+          ? (projectScopeItems.find(
+              (item) => item.value === scopeGroups.find((group) => group.isScratch)?.projectKey,
+            ) ?? projectScopeItems[0]!)
+          : projectScopeItems[0]!));
   const filteredProjectScopeItems = filterSidebarProjectScopeItems({
     items: projectScopeItems,
     query: projectScopeMenuState.query,
@@ -1265,31 +1278,87 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     if (isMobile) setOpenMobile(false);
     void handleNewThread(scopeProjectRef(group.environmentId, group.id));
   });
+  const railThreads = filterSidebarV2VisibleThreads(threads, null, delegatedUnderParent);
+  const railDraftSessions = useComposerDraftStore(
+    useShallow((store) =>
+      Object.entries(store.draftThreadsByThreadKey)
+        .filter(
+          ([draftId, session]) =>
+            session.promotedTo == null &&
+            (draftId === routeDraftIdForRows ||
+              composerDraftHasUserContent(store.draftsByThreadKey[draftId])),
+        )
+        .map(([, session]) => session),
+    ),
+  );
   const railEntries = buildProjectRailEntries({
     groups: scopeGroups,
     primaryEnvironmentId,
     onlineEnvironmentIds: new Set(connectedEnvironmentIds),
     environmentLabelById,
+    sessionProjectRefs: [...railThreads, ...railDraftSessions],
   });
+  const railPreferences = useProjectRailStore((state) => state.byEnvironment);
+  const railGroups = railEntries.map((entry) => entry.group);
+  const snapshotEnvironmentIds = useAtomValue(projectSnapshotEnvironmentIdsAtom);
+  const effectiveRailPreferences = reconcileProjectRailVisibility(
+    railPreferences,
+    railGroups,
+    snapshotEnvironmentIds,
+  );
+  const railVisibleProjectKeys = new Set(
+    railEntries
+      .filter((entry) =>
+        entry.group.memberProjectRefs.some(
+          (ref) => effectiveRailPreferences[ref.environmentId]?.visibility[ref.projectId] === true,
+        ),
+      )
+      .map((entry) => entry.key),
+  );
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Persist first-seen project visibility as environment snapshots arrive.
+  useEffect(() => {
+    if (!isMobile) useProjectRailStore.getState().reconcile(railGroups, snapshotEnvironmentIds);
+  }, [railGroups, snapshotEnvironmentIds, isMobile]);
+  const setRailGroupsVisible = useStableCallback(
+    (entries: Readonly<typeof railEntries>, visible: boolean) => {
+      useProjectRailStore.getState().setVisible(
+        entries.flatMap((entry) => entry.group.memberProjectRefs),
+        visible,
+      );
+    },
+  );
   // The dot speaks for rows the sidebar actually lists; threads shown under a
   // parent (subagents, delegated children) stay out of the count.
   const railActivityByProjectKey = buildProjectRailActivity({
-    groups: scopeGroups,
-    threads: filterSidebarV2VisibleThreads(threads, null, delegatedUnderParent),
+    groups: railEntries.map((entry) => ({
+      projectKey: entry.key,
+      environmentId: entry.environmentId,
+      memberProjectRefs: entry.group.memberProjectRefs,
+    })),
+    threads: railThreads,
   });
   const railSelectionByProjectKey = buildProjectRailSelection({
     selectedProjectKeys: chosenProjectScopeKeys,
+    entries: railEntries.map((entry) => ({
+      key: entry.key,
+      environmentId: entry.environmentId,
+      projectKey: entry.group.projectKey,
+      isScratch: entry.group.isScratch,
+    })),
   });
   const openProjectGroupFromRail = useStableCallback(
-    (group: SidebarProjectSnapshot, additive: boolean) => {
+    (entry: (typeof railEntries)[number], additive: boolean) => {
+      const group = entry.group;
+      // Scratch groups span machines logically; the rail scopes one machine.
+      const scopeKey = group.isScratch
+        ? machineScopedScratchScopeKey(entry.environmentId)
+        : group.projectKey;
       if (additive) {
-        toggleProjectScopeKey(group.projectKey);
+        toggleProjectScopeKey(scopeKey);
         return;
       }
-      if (
-        !(chosenProjectScopeKeys.length === 1 && chosenProjectScopeKeys[0] === group.projectKey)
-      ) {
-        setProjectScopeKeys([group.projectKey]);
+      if (!(chosenProjectScopeKeys.length === 1 && chosenProjectScopeKeys[0] === scopeKey)) {
+        setProjectScopeKeys([scopeKey]);
       }
       const memberProjectKeys = new Set(
         group.memberProjectRefs.map(
@@ -1334,7 +1403,9 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     },
   );
   const handleProjectFolderContextMenu = useStableCallback(
-    (group: SidebarProjectSnapshot, position: { x: number; y: number }) => {
+    (group: SidebarProjectSnapshot, position: { x: number; y: number }, fromRail = false) => {
+      const pinGroup =
+        projectGroups.find((candidate) => candidate.projectKey === group.projectKey) ?? group;
       const api = readLocalApi();
       if (!api) return;
       const newThreadShortcut = shortcutLabelForCommand(keybindings, "chat.new");
@@ -1349,14 +1420,17 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                 ...(newThreadShortcut ? { detail: newThreadShortcut } : {}),
               },
               { id: "copy-path", label: "Copy path", icon: "copy" },
-              ...(canPinProject(group)
+              ...(canPinProject(pinGroup)
                 ? [
-                    group.pinned
+                    pinGroup.pinned
                       ? { id: "unpin", label: "Unpin project", icon: "pin-off" }
                       : { id: "pin", label: "Pin project", icon: "pin" },
                   ]
                 : []),
               { id: "project-settings", label: "Project settings", icon: "settings" },
+              ...(fromRail
+                ? [{ id: "hide-from-rail", label: "Hide from project rail", icon: "eye-off" }]
+                : []),
             ],
             position,
           ),
@@ -1371,10 +1445,13 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
             return;
           case "pin":
           case "unpin":
-            setProjectGroupPinned(group, clicked.value === "pin");
+            setProjectGroupPinned(pinGroup, clicked.value === "pin");
             return;
           case "project-settings":
             openProjectSettings(group);
+            return;
+          case "hide-from-rail":
+            useProjectRailStore.getState().setVisible(group.memberProjectRefs, false);
             return;
         }
       })();
@@ -3023,27 +3100,33 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
               return shell ? `${shell.environmentId}:${shell.projectId}` : null;
             })()
           : null;
-      const anchorProjectKey =
-        chosenProjectScopeKeys.length === 1
-          ? chosenProjectScopeKeys[0]!
-          : routeProjectKey !== null
-            ? (railEntries.find((entry) =>
-                entry.group.memberProjectRefs.some(
-                  (projectRef) =>
-                    `${projectRef.environmentId}:${projectRef.projectId}` === routeProjectKey,
-                ),
-              )?.group.projectKey ?? null)
-            : null;
+      const anchorEntry =
+        railEntries.find((entry) =>
+          entry.group.memberProjectRefs.some(
+            (projectRef) =>
+              `${projectRef.environmentId}:${projectRef.projectId}` === routeProjectKey,
+          ),
+        ) ??
+        (chosenProjectScopeKeys.length === 1
+          ? railEntries.find(
+              (entry) =>
+                entry.group.projectKey === chosenProjectScopeKeys[0] ||
+                (entry.group.isScratch &&
+                  machineScopedScratchScopeKey(entry.environmentId) === chosenProjectScopeKeys[0]),
+            )
+          : undefined);
       const targetProjectKey = resolveAdjacentProjectKey({
-        projectKeys: railEntries.map((entry) => entry.group.projectKey),
-        currentProjectKey: anchorProjectKey,
+        projectKeys: railEntries
+          .filter((entry) => !entry.offline && railVisibleProjectKeys.has(entry.key))
+          .map((entry) => entry.key),
+        currentProjectKey: anchorEntry?.key ?? null,
         direction: projectDirection,
       });
-      const targetEntry = railEntries.find((entry) => entry.group.projectKey === targetProjectKey);
+      const targetEntry = railEntries.find((entry) => entry.key === targetProjectKey);
       if (!targetEntry) return;
       event.preventDefault();
       event.stopPropagation();
-      openProjectGroupFromRail(targetEntry.group, false);
+      openProjectGroupFromRail(targetEntry, false);
     };
     window.addEventListener("keydown", onWindowKeyDown);
     return () => window.removeEventListener("keydown", onWindowKeyDown);
@@ -3057,6 +3140,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     chosenProjectScopeKeys,
     openProjectGroupFromRail,
     railEntries,
+    railVisibleProjectKeys,
     routeDraftThread,
     routeThreadRef,
     threads,
@@ -3102,13 +3186,16 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
           {!isMobile ? (
             <ProjectRail
               entries={railEntries}
+              machineByEnvironmentId={environmentMachineById}
+              visibleProjectKeys={railVisibleProjectKeys}
+              onVisibilityChange={setRailGroupsVisible}
               activityByProjectKey={railActivityByProjectKey}
               selectionByProjectKey={railSelectionByProjectKey}
               allProjectsSelected={chosenProjectScopeKeys.length === 0}
               onOpenAllProjects={() => setProjectScopeKeys([])}
-              onOpenGroup={(entry, additive) => openProjectGroupFromRail(entry.group, additive)}
+              onOpenGroup={openProjectGroupFromRail}
               onGroupContextMenu={(entry, position) =>
-                handleProjectFolderContextMenu(entry.group, position)
+                handleProjectFolderContextMenu(entry.group, position, true)
               }
               onAddProject={openAddProjectCommandPalette}
             />

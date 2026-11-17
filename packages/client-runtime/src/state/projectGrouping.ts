@@ -1,8 +1,8 @@
 import { scopedProjectKey, scopeProjectRef } from "../environment/scoped.ts";
 import {
+  EnvironmentId,
   repositoryGroupingDisplayNameOf,
   repositoryGroupingKeyOf,
-  type EnvironmentId,
   type ScopedProjectRef,
   type SidebarProjectGroupingMode,
 } from "@t3tools/contracts";
@@ -12,6 +12,21 @@ import type { EnvironmentProject } from "./models.ts";
 import { normalizeProjectPathForComparison } from "./projects.ts";
 
 const SCRATCH_PROJECT_SCOPE_KEY = "\0no-project";
+
+/**
+ * Scope key for one machine's scratch project, so a client can filter to that
+ * machine's "No project" threads without matching the logical all-machines group.
+ */
+export function machineScopedScratchScopeKey(environmentId: EnvironmentId): string {
+  return `${SCRATCH_PROJECT_SCOPE_KEY}\0${environmentId}`;
+}
+
+export function parseMachineScopedScratchScopeKey(key: string): EnvironmentId | null {
+  const prefix = `${SCRATCH_PROJECT_SCOPE_KEY}\0`;
+  if (!key.startsWith(prefix)) return null;
+  const environmentId = key.slice(prefix.length);
+  return environmentId.length > 0 ? EnvironmentId.make(environmentId) : null;
+}
 
 export interface ProjectGroupingSettings {
   readonly sidebarProjectGroupingMode: SidebarProjectGroupingMode;

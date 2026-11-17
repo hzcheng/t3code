@@ -1,17 +1,20 @@
 import type { EnvironmentId, ProjectId, ScopedProjectRef } from "@t3tools/contracts";
+import { machineScopedScratchScopeKey } from "@t3tools/client-runtime/state/project-grouping";
+import type { SidebarProjectSnapshot, SidebarProjectGroupMember } from "../sidebarProjectGrouping";
 
 export interface ProjectRailGroupShape {
   readonly projectKey: string;
-  /** The machine this icon represents: the group's representative environment. */
+  /** Sidebar scope remains logical; each rail entry targets one machine. */
   readonly environmentId: EnvironmentId;
   readonly memberProjectRefs: ReadonlyArray<ScopedProjectRef>;
 }
 
 export interface ProjectRailEntry<TGroup extends ProjectRailGroupShape = ProjectRailGroupShape> {
   readonly group: TGroup;
+  readonly key: string;
   readonly environmentId: EnvironmentId;
   readonly environmentLabel: string | null;
-  /** Offline means every member project's environment is disconnected. */
+  /** Whether this entry's machine is disconnected. */
   readonly offline: boolean;
   /** True on the first entry of each machine cluster. */
   readonly dividerBefore: boolean;
@@ -22,26 +25,63 @@ export interface ProjectRailEntry<TGroup extends ProjectRailGroupShape = Project
  * The primary environment leads, other machines follow alphabetically; groups
  * keep their sidebar order within a cluster.
  */
-export function buildProjectRailEntries<TGroup extends ProjectRailGroupShape>(input: {
-  readonly groups: readonly TGroup[];
+export function buildProjectRailEntries(input: {
+  readonly groups: readonly SidebarProjectSnapshot[];
   readonly primaryEnvironmentId: EnvironmentId | null;
   readonly onlineEnvironmentIds: ReadonlySet<EnvironmentId>;
   readonly environmentLabelById: ReadonlyMap<EnvironmentId, string>;
-}): ProjectRailEntry<TGroup>[] {
-  const clusterOrder = new Map<EnvironmentId, number>();
-  const clusterKeys = [...new Set(input.groups.map((group) => group.environmentId))].sort(
-    (a, b) => {
-      if (a === input.primaryEnvironmentId) return -1;
-      if (b === input.primaryEnvironmentId) return 1;
-      const labelCompare = (input.environmentLabelById.get(a) ?? "").localeCompare(
-        input.environmentLabelById.get(b) ?? "",
-      );
-      return labelCompare !== 0 ? labelCompare : String(a).localeCompare(String(b));
-    },
+  readonly sessionProjectRefs: readonly ScopedProjectRef[];
+}): ProjectRailEntry<SidebarProjectSnapshot>[] {
+  const sessionProjectKeys = new Set(
+    input.sessionProjectRefs.map((ref) => `${ref.environmentId}:${ref.projectId}`),
   );
+  const groups = input.groups.flatMap((group) => {
+    const membersByEnvironment = new Map<EnvironmentId, SidebarProjectGroupMember[]>();
+    for (const member of group.memberProjects) {
+      const members = membersByEnvironment.get(member.environmentId) ?? [];
+      members.push(member);
+      membersByEnvironment.set(member.environmentId, members);
+    }
+    return [...membersByEnvironment].flatMap(([environmentId, members]) => {
+      const active = members.filter((member) => member.archivedAt == null);
+      if (active.length === 0) return [];
+      if (
+        group.isScratch &&
+        !active.some((member) => sessionProjectKeys.has(`${environmentId}:${member.id}`))
+      )
+        return [];
+      const representative = active.find((member) => member.id === group.id) ?? active[0]!;
+      const local = environmentId === input.primaryEnvironmentId;
+      return [
+        {
+          ...group,
+          ...representative,
+          groupedProjectCount: members.length,
+          environmentPresence: local ? ("local-only" as const) : ("remote-only" as const),
+          memberProjects: members,
+          memberProjectRefs: group.memberProjectRefs.filter(
+            (ref) => ref.environmentId === environmentId,
+          ),
+          remoteEnvironmentLabels:
+            local || !representative.environmentLabel ? [] : [representative.environmentLabel],
+          pinned: members.some((member) => member.pinnedAt != null),
+          archived: false,
+        },
+      ];
+    });
+  });
+  const clusterOrder = new Map<EnvironmentId, number>();
+  const clusterKeys = [...new Set(groups.map((group) => group.environmentId))].sort((a, b) => {
+    if (a === input.primaryEnvironmentId) return -1;
+    if (b === input.primaryEnvironmentId) return 1;
+    const labelCompare = (input.environmentLabelById.get(a) ?? "").localeCompare(
+      input.environmentLabelById.get(b) ?? "",
+    );
+    return labelCompare !== 0 ? labelCompare : String(a).localeCompare(String(b));
+  });
   clusterKeys.forEach((environmentId, index) => clusterOrder.set(environmentId, index));
 
-  const ordered = input.groups
+  const ordered = groups
     .map((group, index) => ({ group, index }))
     .sort(
       (a, b) =>
@@ -51,11 +91,10 @@ export function buildProjectRailEntries<TGroup extends ProjectRailGroupShape>(in
 
   return ordered.map(({ group }, orderedIndex) => ({
     group,
+    key: JSON.stringify([group.environmentId, group.projectKey]),
     environmentId: group.environmentId,
     environmentLabel: input.environmentLabelById.get(group.environmentId) ?? null,
-    offline: group.memberProjectRefs.every(
-      (projectRef) => !input.onlineEnvironmentIds.has(projectRef.environmentId),
-    ),
+    offline: !input.onlineEnvironmentIds.has(group.environmentId),
     dividerBefore:
       orderedIndex > 0 && ordered[orderedIndex - 1]!.group.environmentId !== group.environmentId,
   }));
@@ -162,11 +201,32 @@ export function buildProjectRailActivity(input: {
 
 export type ProjectRailSelection = "single" | "multi";
 
+/**
+ * Selection state per rail entry (keyed by entry key). A machine-qualified
+ * scratch scope marks only that machine's No project; the logical scratch
+ * scope marks every machine's.
+ */
 export function buildProjectRailSelection(input: {
   readonly selectedProjectKeys: readonly string[];
+  readonly entries: ReadonlyArray<{
+    readonly key: string;
+    readonly environmentId: EnvironmentId;
+    readonly projectKey: string;
+    readonly isScratch?: boolean | undefined;
+  }>;
 }): ReadonlyMap<string, ProjectRailSelection> {
+  const selected = new Set(input.selectedProjectKeys);
   const kind: ProjectRailSelection = input.selectedProjectKeys.length > 1 ? "multi" : "single";
-  return new Map(input.selectedProjectKeys.map((key) => [key, kind] as const));
+  const map = new Map<string, ProjectRailSelection>();
+  for (const entry of input.entries) {
+    if (
+      selected.has(entry.projectKey) ||
+      (entry.isScratch === true && selected.has(machineScopedScratchScopeKey(entry.environmentId)))
+    ) {
+      map.set(entry.key, kind);
+    }
+  }
+  return map;
 }
 
 export type ProjectRailDirection = "previous" | "next";

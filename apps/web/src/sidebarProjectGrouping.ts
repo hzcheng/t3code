@@ -6,6 +6,7 @@ import type {
 import {
   buildProjectGroups,
   derivePhysicalProjectKey,
+  parseMachineScopedScratchScopeKey,
   resolveScratchProjectScopeKey,
   type ProjectGroupingSettings,
 } from "@t3tools/client-runtime/state/project-grouping";
@@ -96,6 +97,15 @@ export function resolveSidebarProjectScopeKey(input: {
   readonly canClearMissingScope?: boolean;
 }): string | null {
   if (input.key === null) return null;
+  const scratchEnvironmentId = parseMachineScopedScratchScopeKey(input.key);
+  if (scratchEnvironmentId !== null) {
+    const hasScratchMember = input.groups.some(
+      (candidate) =>
+        candidate.isScratch &&
+        candidate.memberProjects.some((member) => member.environmentId === scratchEnvironmentId),
+    );
+    return hasScratchMember || !input.canClearMissingScope ? input.key : null;
+  }
   const group =
     input.groups.find((candidate) => candidate.projectKey === input.key) ??
     input.groups.find(
@@ -116,6 +126,57 @@ export function resolveSidebarProjectScopeKeys(input: {
   return [
     ...new Set(input.keys.flatMap((key) => resolveSidebarProjectScopeKey({ ...input, key }) ?? [])),
   ];
+}
+
+/**
+ * The snapshots a persisted scope selects. A machine-qualified scratch key
+ * yields a snapshot holding only that machine's members, so thread filtering,
+ * search and folder scoping stay on that machine.
+ */
+export function resolveScopedProjectGroups(input: {
+  readonly groups: ReadonlyArray<SidebarProjectSnapshot>;
+  readonly keys: ReadonlyArray<string>;
+  readonly primaryEnvironmentId: EnvironmentId | null;
+  readonly resolveEnvironmentLabel?: (environmentId: EnvironmentId) => string | null;
+}): SidebarProjectSnapshot[] {
+  const keys = new Set(input.keys);
+  return input.groups.flatMap((group) => {
+    if (keys.has(group.projectKey)) return [group];
+    if (!group.isScratch) return [];
+    return [...keys].flatMap((key) => {
+      const environmentId = parseMachineScopedScratchScopeKey(key);
+      if (environmentId === null) return [];
+      const memberProjects = group.memberProjects.filter(
+        (member) => member.environmentId === environmentId,
+      );
+      if (memberProjects.length === 0) return [];
+      const representative =
+        memberProjects.find(
+          (member) => member.environmentId === group.environmentId && member.id === group.id,
+        ) ?? memberProjects[0]!;
+      const environmentLabel = input.resolveEnvironmentLabel?.(environmentId) ?? null;
+      return [
+        {
+          ...group,
+          ...representative,
+          projectKey: key,
+          displayName: environmentLabel
+            ? `${group.displayName} · ${environmentLabel}`
+            : group.displayName,
+          groupedProjectCount: memberProjects.length,
+          environmentPresence:
+            environmentId === input.primaryEnvironmentId ? "local-only" : "remote-only",
+          memberProjects,
+          memberProjectRefs: group.memberProjectRefs.filter(
+            (projectRef) => projectRef.environmentId === environmentId,
+          ),
+          remoteEnvironmentLabels: environmentLabel ? [environmentLabel] : [],
+          pinned: memberProjects.some((member) => member.pinnedAt != null),
+          archived: false,
+        } satisfies SidebarProjectSnapshot,
+      ];
+    });
+  });
 }
 
 export function buildPhysicalToLogicalProjectKeyMap(input: {

@@ -57,6 +57,27 @@ in a new thread's model picker to add or remove them. A regular click returns to
 single model. Choose a base branch and send. Each selection starts a separate thread
 and worktree while you stay in the new thread composer. This requires a Git project.
 
+## Switch projects
+
+On web and desktop, the project rail groups projects by machine. Click a project to
+show its threads; Shift-click or Cmd/Ctrl-click to select several. **All projects**
+clears that filter. Use `mod+alt+p` to find a project, or `mod+alt+[` and `mod+alt+]`
+to cycle through connected projects shown in the rail.
+
+Each machine initially shows its first three projects. Open the machine icon above
+its projects to show or hide as many projects as you like. Checkboxes control visibility, not the thread
+filter, and the list stays open while you make several changes. Clicking **No project** on a machine
+filters to that machine's threads without a project; the project filter menu's **No project** entry
+still selects every machine's. The **All projects**
+checkbox shows or hides the whole machine's projects, even when you are searching.
+When only some projects are shown, clicking it shows them all.
+Changes save automatically on this client only. Hiding an entry does not archive
+the project or change your thread filter. You can manage offline entries, but
+cannot switch to them until a machine is connected.
+
+Projects you create or add on this client appear automatically; projects discovered
+later from another client stay in the full list until you choose to show them.
+
 ## Pin and reorder threads
 
 Pin a thread from its menu to keep it above your active work.

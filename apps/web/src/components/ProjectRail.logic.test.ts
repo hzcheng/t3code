@@ -1,4 +1,10 @@
-import { EnvironmentId, ProjectId } from "@t3tools/contracts";
+import { EnvironmentId, ProjectId, SourceControlProviderKind } from "@t3tools/contracts";
+import { machineScopedScratchScopeKey } from "@t3tools/client-runtime/state/project-grouping";
+import {
+  buildSidebarProjectSnapshots,
+  type SidebarProjectSnapshot,
+} from "../sidebarProjectGrouping";
+import { reconcileProjectRailVisibility } from "../projectRailStore";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
@@ -6,7 +12,6 @@ import {
   buildProjectRailEntries,
   buildProjectRailSelection,
   resolveAdjacentProjectKey,
-  type ProjectRailGroupShape,
   type ProjectRailThreadInput,
 } from "./ProjectRail.logic";
 
@@ -24,14 +29,29 @@ function makeGroup(
   projectKey: string,
   environmentId: EnvironmentId,
   memberEnvironmentIds: readonly EnvironmentId[] = [environmentId],
-): ProjectRailGroupShape {
-  return {
-    projectKey,
-    environmentId,
-    memberProjectRefs: memberEnvironmentIds.map((memberEnvironmentId, index) => ({
+): SidebarProjectSnapshot {
+  const group = buildSidebarProjectSnapshots({
+    projects: memberEnvironmentIds.map((memberEnvironmentId, index) => ({
       environmentId: memberEnvironmentId,
-      projectId: ProjectId.make(`${projectKey}-${index}`),
+      id: ProjectId.make(`${projectKey}-${index}`),
+      title: projectKey,
+      workspaceRoot: `/work/${projectKey}-${index}`,
+      defaultModelSelection: null,
+      scripts: [],
+      createdAt: "2026-01-01T00:00:00Z",
+      updatedAt: "2026-01-01T00:00:00Z",
     })),
+    settings: { sidebarProjectGroupingMode: "separate", sidebarProjectGroupingOverrides: {} },
+    primaryEnvironmentId: environmentId,
+    resolveEnvironmentLabel: (id) => environmentLabelById.get(id) ?? null,
+  });
+  const representative =
+    group.find((candidate) => candidate.environmentId === environmentId) ?? group[0]!;
+  return {
+    ...representative,
+    projectKey,
+    memberProjects: group.flatMap((candidate) => candidate.memberProjects),
+    memberProjectRefs: group.flatMap((candidate) => candidate.memberProjectRefs),
   };
 }
 
@@ -50,6 +70,130 @@ function makeThread(overrides: Partial<ProjectRailThreadInput> = {}): ProjectRai
 }
 
 describe("buildProjectRailEntries", () => {
+  it("only offers No project on machines with their own scratch sessions", () => {
+    const local = {
+      ...makeGroup("scratch-local", localEnvironmentId).memberProjects[0]!,
+      isScratch: true as const,
+    };
+    const remote = {
+      ...makeGroup("scratch-remote", remoteAEnvironmentId).memberProjects[0]!,
+      id: local.id,
+      isScratch: true as const,
+    };
+    const ordinary = {
+      ...makeGroup("ordinary", remoteAEnvironmentId).memberProjects[0]!,
+      title: "No project",
+    };
+    const groups = buildSidebarProjectSnapshots({
+      projects: [local, remote, ordinary],
+      groupScratchProjects: true,
+      settings: { sidebarProjectGroupingMode: "repository", sidebarProjectGroupingOverrides: {} },
+      primaryEnvironmentId: localEnvironmentId,
+      resolveEnvironmentLabel: (id) => environmentLabelById.get(id) ?? null,
+    });
+    const input = {
+      groups,
+      primaryEnvironmentId: localEnvironmentId,
+      onlineEnvironmentIds: new Set([localEnvironmentId, remoteAEnvironmentId]),
+      environmentLabelById,
+      sessionProjectRefs: [{ environmentId: local.environmentId, projectId: local.id }],
+    };
+    const entries = buildProjectRailEntries(input);
+    expect(
+      entries.filter((entry) => entry.group.isScratch).map((entry) => entry.environmentId),
+    ).toEqual([localEnvironmentId]);
+    expect(entries.some((entry) => entry.group.id === ordinary.id)).toBe(true);
+    expect(
+      buildProjectRailEntries({ ...input, sessionProjectRefs: [] }).some(
+        (entry) => entry.group.isScratch,
+      ),
+    ).toBe(false);
+    expect(
+      buildProjectRailEntries({
+        ...input,
+        sessionProjectRefs: [{ environmentId: remote.environmentId, projectId: remote.id }],
+      })
+        .filter((entry) => entry.group.isScratch)
+        .map((entry) => entry.environmentId),
+    ).toEqual([remoteAEnvironmentId]);
+    const both = buildProjectRailEntries({
+      ...input,
+      sessionProjectRefs: [
+        ...input.sessionProjectRefs,
+        { environmentId: remote.environmentId, projectId: remote.id },
+      ],
+    });
+    expect(
+      both.filter((entry) => entry.group.isScratch).map((entry) => entry.environmentId),
+    ).toEqual([localEnvironmentId, remoteAEnvironmentId]);
+  });
+
+  it("keeps shared repositories on each machine and initializes three logical entries", () => {
+    const projects = [
+      [localEnvironmentId, "a1", "a"],
+      [localEnvironmentId, "a2", "a"],
+      [localEnvironmentId, "a3", "a"],
+      [localEnvironmentId, "b", "b"],
+      [localEnvironmentId, "c", "c"],
+      [localEnvironmentId, "d", "d"],
+      [remoteAEnvironmentId, "remote-a", "a"],
+    ] as const;
+    const groups = buildSidebarProjectSnapshots({
+      projects: projects.map(([environmentId, id, repository]) => ({
+        environmentId,
+        id: ProjectId.make(id),
+        title: repository,
+        workspaceRoot: `/work/${id}`,
+        repositoryIdentity: {
+          canonicalKey: `github.com/test/${repository}`,
+          locator: {
+            source: "git-remote",
+            remoteName: "origin",
+            remoteUrl: `https://github.com/test/${repository}.git`,
+          },
+          provider: SourceControlProviderKind.make("github"),
+          owner: "test",
+          name: repository,
+          displayName: repository,
+        },
+        defaultModelSelection: null,
+        scripts: [],
+        createdAt: "2026-01-01T00:00:00Z",
+        updatedAt: "2026-01-01T00:00:00Z",
+      })),
+      settings: { sidebarProjectGroupingMode: "repository", sidebarProjectGroupingOverrides: {} },
+      primaryEnvironmentId: localEnvironmentId,
+      resolveEnvironmentLabel: (id) => environmentLabelById.get(id) ?? null,
+    });
+    const entries = buildProjectRailEntries({
+      groups,
+      primaryEnvironmentId: localEnvironmentId,
+      onlineEnvironmentIds: new Set([localEnvironmentId]),
+      environmentLabelById,
+      sessionProjectRefs: [],
+    });
+    const visibility = reconcileProjectRailVisibility(
+      {},
+      entries.map((entry) => entry.group),
+    );
+    expect(visibility[localEnvironmentId]?.visibility).toEqual({
+      a1: true,
+      a2: true,
+      a3: true,
+      b: true,
+      c: true,
+      d: false,
+    });
+    expect(visibility[remoteAEnvironmentId]?.visibility).toEqual({ "remote-a": true });
+    expect(entries.filter((entry) => entry.environmentId === remoteAEnvironmentId)).toHaveLength(1);
+    expect(entries.find((entry) => entry.environmentId === remoteAEnvironmentId)?.offline).toBe(
+      true,
+    );
+    expect(
+      entries.find((entry) => entry.environmentId === remoteAEnvironmentId)?.group.workspaceRoot,
+    ).toBe("/work/remote-a");
+  });
+
   it("clusters icons by machine, primary environment first, remotes alphabetical", () => {
     const groups = [
       makeGroup("beta-1", remoteBEnvironmentId),
@@ -67,6 +211,7 @@ describe("buildProjectRailEntries", () => {
         remoteBEnvironmentId,
       ]),
       environmentLabelById,
+      sessionProjectRefs: [],
     });
     expect(entries.map((entry) => entry.group.projectKey)).toEqual([
       "local-1",
@@ -78,21 +223,36 @@ describe("buildProjectRailEntries", () => {
     expect(entries.map((entry) => entry.dividerBefore)).toEqual([false, false, true, false, true]);
   });
 
-  it("marks a group offline only when every member environment is disconnected", () => {
-    const mixed = makeGroup("mixed", remoteAEnvironmentId, [
+  it("keeps online and offline copies of a shared repository independently addressable", () => {
+    const shared = makeGroup("mixed", remoteAEnvironmentId, [
       localEnvironmentId,
       remoteAEnvironmentId,
+      remoteAEnvironmentId,
     ]);
+    const mixed = {
+      ...shared,
+      memberProjects: shared.memberProjects.map((member, index) =>
+        index === 1 ? { ...member, archivedAt: "2026-01-02T00:00:00Z" } : member,
+      ),
+    };
     const remoteOnly = makeGroup("remote", remoteBEnvironmentId);
     const entries = buildProjectRailEntries({
       groups: [mixed, remoteOnly],
       primaryEnvironmentId: localEnvironmentId,
       onlineEnvironmentIds: new Set([localEnvironmentId]),
       environmentLabelById,
+      sessionProjectRefs: [],
     });
-    const byKey = new Map(entries.map((entry) => [entry.group.projectKey, entry.offline]));
-    expect(byKey.get("mixed")).toBe(false);
-    expect(byKey.get("remote")).toBe(true);
+    expect(entries.map((entry) => [entry.environmentId, entry.offline])).toEqual([
+      [localEnvironmentId, false],
+      [remoteAEnvironmentId, true],
+      [remoteBEnvironmentId, true],
+    ]);
+    expect(new Set(entries.map((entry) => entry.key)).size).toBe(3);
+    expect(entries.filter((entry) => entry.group.projectKey === "mixed")).toHaveLength(2);
+    expect(entries.find((entry) => entry.environmentId === remoteAEnvironmentId)?.group.id).toBe(
+      "mixed-2",
+    );
   });
 });
 
@@ -187,11 +347,45 @@ describe("buildProjectRailActivity", () => {
 });
 
 describe("buildProjectRailSelection", () => {
+  const selectionEntry = (key: string, projectKey: string, overrides = {}) => ({
+    key,
+    environmentId: localEnvironmentId,
+    projectKey,
+    ...overrides,
+  });
+
   it("marks a single selected key as single and several as multi", () => {
-    expect(buildProjectRailSelection({ selectedProjectKeys: ["a"] }).get("a")).toBe("single");
-    const multi = buildProjectRailSelection({ selectedProjectKeys: ["a", "b"] });
-    expect(multi.get("a")).toBe("multi");
-    expect(multi.get("b")).toBe("multi");
+    const single = buildProjectRailSelection({
+      selectedProjectKeys: ["a"],
+      entries: [selectionEntry("entry-a", "a")],
+    });
+    expect(single.get("entry-a")).toBe("single");
+    const multi = buildProjectRailSelection({
+      selectedProjectKeys: ["a", "b"],
+      entries: [selectionEntry("entry-a", "a"), selectionEntry("entry-b", "b")],
+    });
+    expect(multi.get("entry-a")).toBe("multi");
+    expect(multi.get("entry-b")).toBe("multi");
+  });
+
+  it("scopes a machine-qualified scratch selection to that machine's entry", () => {
+    const local = selectionEntry("local-scratch", "\0no-project", { isScratch: true });
+    const remote = selectionEntry("remote-scratch", "\0no-project", {
+      isScratch: true,
+      environmentId: remoteAEnvironmentId,
+    });
+    const machineScoped = buildProjectRailSelection({
+      selectedProjectKeys: [machineScopedScratchScopeKey(remoteAEnvironmentId)],
+      entries: [local, remote],
+    });
+    expect(machineScoped.get("remote-scratch")).toBe("single");
+    expect(machineScoped.has("local-scratch")).toBe(false);
+    const logical = buildProjectRailSelection({
+      selectedProjectKeys: ["\0no-project"],
+      entries: [local, remote],
+    });
+    expect(logical.get("local-scratch")).toBe("single");
+    expect(logical.get("remote-scratch")).toBe("single");
   });
 });
 
