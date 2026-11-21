@@ -41,12 +41,25 @@ jobs:
         run: cp .env.example .env
       - name: Build macOS arm64
         run: vp run dist:desktop:dmg:arm64
-      - name: Verify DMG
+      - name: Verify packaged app signatures
         run: |
           shopt -s nullglob
-          artifacts=(release/*-arm64.dmg)
-          [[ ${#artifacts[@]} -eq 1 ]]
-          hdiutil verify "${artifacts[0]}"
+          dmgs=(release/*-arm64.dmg)
+          zips=(release/*-arm64.zip)
+          [[ ${#dmgs[@]} -eq 1 && ${#zips[@]} -eq 1 ]]
+          verify_app() {
+            local apps=("$1"/*.app)
+            [[ ${#apps[@]} -eq 1 ]]
+            codesign --verify --deep --strict --verbose=2 "${apps[0]}"
+          }
+          mountpoint=$(mktemp -d)
+          hdiutil verify "${dmgs[0]}"
+          hdiutil attach -readonly -nobrowse -mountpoint "$mountpoint" "${dmgs[0]}"
+          trap 'hdiutil detach "$mountpoint"' EXIT
+          verify_app "$mountpoint"
+          unpacked=$(mktemp -d)
+          ditto -x -k "${zips[0]}" "$unpacked"
+          verify_app "$unpacked"
       - name: Publish fork release
         env:
           GH_TOKEN: ${{ github.token }}
