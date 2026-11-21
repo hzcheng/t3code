@@ -1,0 +1,60 @@
+name: Fork macOS arm64 release
+
+on:
+  push:
+    tags: ["v*-hz.*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fork-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    if: github.repository == 'hzcheng/t3code'
+    runs-on: macos-15
+    timeout-minutes: 60
+    permissions:
+      contents: write
+    env:
+      T3CODE_DESKTOP_UPDATE_REPOSITORY: hzcheng/t3code
+      CSC_IDENTITY_AUTO_DISCOVERY: "false"
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          fetch-depth: 0
+      - name: Validate release tag and main ancestry
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-hz\.[1-9][0-9]*$ ]] || exit 1
+          git fetch origin main
+          git merge-base --is-ancestor HEAD origin/main
+          echo "T3CODE_DESKTOP_VERSION=${TAG#v}" >> "$GITHUB_ENV"
+      - uses: voidzero-dev/setup-vp@250f29ce396baf5e8f24498e17c0dfdebabc26eb # v1.15.0
+        with:
+          run-install: false
+      - run: vp install --frozen-lockfile
+      - name: Configure public Connect defaults
+        run: cp .env.example .env
+      - name: Build macOS arm64
+        run: vp run dist:desktop:dmg:arm64
+      - name: Verify DMG
+        run: |
+          shopt -s nullglob
+          artifacts=(release/*-arm64.dmg)
+          [[ ${#artifacts[@]} -eq 1 ]]
+          hdiutil verify "${artifacts[0]}"
+      - name: Publish fork release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          printf '%s\n' 'macOS Apple Silicon (arm64) build of the hzcheng/t3code fork.' '' \
+            'This build is not Developer ID signed or notarized. macOS may require manual approval to open it. Automatic installation of updates is not guaranteed for unsigned builds.' > "$RUNNER_TEMP/release-notes.md"
+          gh release create "$TAG" --verify-tag --prerelease --title "$TAG" \
+            --notes-file "$RUNNER_TEMP/release-notes.md" \
+            release/*-arm64.dmg release/*-arm64.dmg.blockmap \
+            release/*-arm64.zip release/*-arm64.zip.blockmap release/*-mac.yml
