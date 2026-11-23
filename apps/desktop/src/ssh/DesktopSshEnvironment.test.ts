@@ -34,9 +34,21 @@ describe("resolveDesktopSshCliRunner", () => {
     Effect.gen(function* () {
       const environment = yield* packagedEnvironment;
 
-      const runner = resolveDesktopSshCliRunner(environment, {
-        [CLI_RELEASE_BASE_URL_ENV]: "https://mirror.example.com/t3code",
+      assert.deepStrictEqual(resolveDesktopSshCliRunner(environment, {}, ""), {
+        archiveVersion: "0.0.22",
       });
+      const bakedBaseUrl = "https://github.com/hzcheng/t3code/releases/download";
+      assert.deepStrictEqual(resolveDesktopSshCliRunner(environment, {}, bakedBaseUrl), {
+        archiveVersion: "0.0.22",
+        releaseBaseUrl: bakedBaseUrl,
+      });
+      const runner = resolveDesktopSshCliRunner(
+        environment,
+        {
+          [CLI_RELEASE_BASE_URL_ENV]: "https://mirror.example.com/t3code",
+        },
+        bakedBaseUrl,
+      );
 
       assert.deepStrictEqual(runner, {
         archiveVersion: "0.0.22",

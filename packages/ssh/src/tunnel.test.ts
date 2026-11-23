@@ -299,11 +299,18 @@ describe("ssh tunnel scripts", () => {
   });
 
   it.each([
-    { host: "Darwin x86_64", system: "Darwin", machine: "x86_64", downloads: false },
-    { host: "Darwin arm64", system: "Darwin", machine: "arm64", downloads: true },
+    { host: "Darwin x86_64", system: "Darwin", machine: "x86_64", downloads: false, code: 6 },
+    { host: "Darwin arm64", system: "Darwin", machine: "arm64", downloads: true, code: 6 },
+    {
+      host: "Linux x64 missing release",
+      system: "Linux",
+      machine: "x86_64",
+      downloads: true,
+      code: 22,
+    },
   ])(
     "only downloads a release archive the host can run: $host",
-    ({ system, machine, downloads }) => {
+    ({ system, machine, downloads, code }) => {
       const root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-ssh-runner-"));
       try {
         const bin = NodePath.join(root, "bin");
@@ -316,7 +323,7 @@ describe("ssh tunnel scripts", () => {
         );
         NodeFS.writeFileSync(
           NodePath.join(bin, "curl"),
-          "#!/bin/sh\necho 'download attempt' >&2\necho 'curl: (6) Could not resolve host: github.com' >&2\nexit 6\n",
+          `#!/bin/sh\necho 'download attempt' >&2\necho 'curl: (${code}) ${code === 22 ? "The requested URL returned error: 404" : "Could not resolve host: github.com"}' >&2\nexit ${code}\n`,
           { mode: 0o755 },
         );
         const runner = NodePath.join(root, "run-t3.sh");
@@ -328,6 +335,11 @@ describe("ssh tunnel scripts", () => {
         assert.notEqual(result.status, 0);
         if (downloads) {
           assert.include(result.stderr, "download attempt");
+          assert.include(
+            result.stderr,
+            "SSH connected, but the remote T3 service could not be installed",
+          );
+          assert.include(result.stderr, "Publish the matching service archive and SHA256SUMS");
           // A bare curl error does not tell the user that t3 itself could not be downloaded.
           assert.include(result.stderr, ARCHIVE.archiveVersion);
           assert.include(result.stderr, "https://github.com/pingdotgg/t3code/releases/download");

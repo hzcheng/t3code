@@ -79,9 +79,14 @@ export interface DesktopSshEnvironmentLayerOptions {
   readonly resolveLauncherId?: Effect.Effect<string | null>;
 }
 
+declare const __T3CODE_BUILD_CLI_RELEASE_BASE_URL__: string | undefined;
+
 export const resolveDesktopSshCliRunner = (
   environment: DesktopEnvironment.DesktopEnvironment["Service"],
   env: NodeJS.ProcessEnv,
+  buildReleaseBaseUrl = typeof __T3CODE_BUILD_CLI_RELEASE_BASE_URL__ === "undefined"
+    ? undefined
+    : __T3CODE_BUILD_CLI_RELEASE_BASE_URL__,
 ): SshTunnel.RemoteT3RunnerOptions => {
   const devRemoteEntryPath = Option.getOrUndefined(environment.devRemoteT3ServerEntryPath);
   if (environment.isDevelopment && devRemoteEntryPath !== undefined) {
@@ -90,7 +95,8 @@ export const resolveDesktopSshCliRunner = (
       nodeEngineRange: serverPackageJson.engines.node,
     };
   }
-  const releaseBaseUrl = env[CLI_RELEASE_BASE_URL_ENV]?.trim() || undefined;
+  const releaseBaseUrl =
+    env[CLI_RELEASE_BASE_URL_ENV]?.trim() || buildReleaseBaseUrl?.trim() || undefined;
   return {
     archiveVersion: environment.appVersion,
     ...(releaseBaseUrl === undefined ? {} : { releaseBaseUrl }),
