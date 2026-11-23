@@ -108,8 +108,7 @@ import { configuredHostedAppUrl } from "../hostedPairing";
 import { useSidebarPendingFileDropStore } from "../sidebarPendingFileDropStore";
 import { SidebarFolderDrop } from "./sidebar/SidebarFolderDrop";
 import {
-  machineScopedScratchScopeKey,
-  parseMachineScopedScratchScopeKey,
+  parseMachineScopedProjectKey,
   pickableProjectGroups,
   selectProjectGroupingSettings,
 } from "@t3tools/client-runtime/state/project-grouping";
@@ -1185,16 +1184,12 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     (item) => item.value,
     projectScopeMenuState.open,
   );
+  const firstScopeKey = projectScopeKeys[0] ?? "all";
+  const pickerKey = parseMachineScopedProjectKey(firstScopeKey)?.projectKey ?? firstScopeKey;
   const selectedProjectScopeItem =
     projectScopeKeys.length > 1
       ? null
-      : (projectScopeItems.find((item) => item.value === (projectScopeKeys[0] ?? "all")) ??
-        // A machine-qualified scratch scope displays through the logical No project item.
-        (parseMachineScopedScratchScopeKey(projectScopeKeys[0] ?? "") !== null
-          ? (projectScopeItems.find(
-              (item) => item.value === scopeGroups.find((group) => group.isScratch)?.projectKey,
-            ) ?? projectScopeItems[0]!)
-          : projectScopeItems[0]!));
+      : (projectScopeItems.find((item) => item.value === pickerKey) ?? projectScopeItems[0]!);
   const filteredProjectScopeItems = filterSidebarProjectScopeItems({
     items: projectScopeItems,
     query: projectScopeMenuState.query,
@@ -1332,20 +1327,12 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
   });
   const railSelectionByProjectKey = buildProjectRailSelection({
     selectedProjectKeys: chosenProjectScopeKeys,
-    entries: railEntries.map((entry) => ({
-      key: entry.key,
-      environmentId: entry.environmentId,
-      projectKey: entry.group.projectKey,
-      isScratch: entry.group.isScratch,
-    })),
+    entries: railEntries,
   });
   const openProjectGroupFromRail = useStableCallback(
     (entry: (typeof railEntries)[number], additive: boolean) => {
       const group = entry.group;
-      // Scratch groups span machines logically; the rail scopes one machine.
-      const scopeKey = group.isScratch
-        ? machineScopedScratchScopeKey(entry.environmentId)
-        : group.projectKey;
+      const scopeKey = entry.key;
       if (additive) {
         toggleProjectScopeKey(scopeKey);
         return;
@@ -1402,8 +1389,9 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
       source: ContextMenuSource,
       fromRail = false,
     ) => {
-      const pinGroup =
-        projectGroups.find((candidate) => candidate.projectKey === group.projectKey) ?? group;
+      const logicalKey =
+        parseMachineScopedProjectKey(group.projectKey)?.projectKey ?? group.projectKey;
+      const pinGroup = projectGroupByScopeKey.get(logicalKey) ?? group;
       const api = readLocalApi();
       if (!api) return;
       const newThreadShortcut = shortcutLabelForCommand(keybindings, "chat.new");
@@ -3109,8 +3097,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
           ? railEntries.find(
               (entry) =>
                 entry.group.projectKey === chosenProjectScopeKeys[0] ||
-                (entry.group.isScratch &&
-                  machineScopedScratchScopeKey(entry.environmentId) === chosenProjectScopeKeys[0]),
+                entry.key === chosenProjectScopeKeys[0],
             )
           : undefined);
       const targetProjectKey = resolveAdjacentProjectKey({

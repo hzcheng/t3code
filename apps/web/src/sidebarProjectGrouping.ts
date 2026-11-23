@@ -6,7 +6,7 @@ import type {
 import {
   buildProjectGroups,
   derivePhysicalProjectKey,
-  parseMachineScopedScratchScopeKey,
+  parseMachineScopedProjectKey,
   resolveScratchProjectScopeKey,
   type ProjectGroupingSettings,
 } from "@t3tools/client-runtime/state/project-grouping";
@@ -75,7 +75,8 @@ export function getSidebarProjectSettingsKey(
   projects: ReadonlyArray<Project>,
   projectRef?: ScopedProjectRef,
 ): string {
-  if (!group.isScratch) return group.projectKey;
+  if (!group.isScratch)
+    return parseMachineScopedProjectKey(group.projectKey)?.projectKey ?? group.projectKey;
   const project =
     group.memberProjects.find(
       (member) =>
@@ -97,14 +98,16 @@ export function resolveSidebarProjectScopeKey(input: {
   readonly canClearMissingScope?: boolean;
 }): string | null {
   if (input.key === null) return null;
-  const scratchEnvironmentId = parseMachineScopedScratchScopeKey(input.key);
-  if (scratchEnvironmentId !== null) {
-    const hasScratchMember = input.groups.some(
+  const scope = parseMachineScopedProjectKey(input.key);
+  if (scope !== null) {
+    const hasMember = input.groups.some(
       (candidate) =>
-        candidate.isScratch &&
-        candidate.memberProjects.some((member) => member.environmentId === scratchEnvironmentId),
+        candidate.projectKey === scope.projectKey &&
+        candidate.memberProjects.some(
+          (member) => member.environmentId === scope.environmentId && member.archivedAt == null,
+        ),
     );
-    return hasScratchMember || !input.canClearMissingScope ? input.key : null;
+    return hasMember || !input.canClearMissingScope ? input.key : null;
   }
   const group =
     input.groups.find((candidate) => candidate.projectKey === input.key) ??
@@ -129,7 +132,7 @@ export function resolveSidebarProjectScopeKeys(input: {
 }
 
 /**
- * The snapshots a persisted scope selects. A machine-qualified scratch key
+ * The snapshots a persisted scope selects. A machine-qualified key
  * yields a snapshot holding only that machine's members, so thread filtering,
  * search and folder scoping stay on that machine.
  */
@@ -142,10 +145,10 @@ export function resolveScopedProjectGroups(input: {
   const keys = new Set(input.keys);
   return input.groups.flatMap((group) => {
     if (keys.has(group.projectKey)) return [group];
-    if (!group.isScratch) return [];
     return [...keys].flatMap((key) => {
-      const environmentId = parseMachineScopedScratchScopeKey(key);
-      if (environmentId === null) return [];
+      const scope = parseMachineScopedProjectKey(key);
+      if (scope?.projectKey !== group.projectKey) return [];
+      const { environmentId } = scope;
       const memberProjects = group.memberProjects.filter(
         (member) => member.environmentId === environmentId,
       );
