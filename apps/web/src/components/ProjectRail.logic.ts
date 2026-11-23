@@ -1,6 +1,10 @@
 import type { EnvironmentId, ProjectId, ScopedProjectRef } from "@t3tools/contracts";
 import { machineScopedProjectKey } from "@t3tools/client-runtime/state/project-grouping";
-import type { SidebarProjectSnapshot, SidebarProjectGroupMember } from "../sidebarProjectGrouping";
+import {
+  activeMachineProject,
+  type SidebarProjectSnapshot,
+  type SidebarProjectGroupMember,
+} from "../sidebarProjectGrouping";
 
 export interface ProjectRailGroupShape {
   readonly projectKey: string;
@@ -43,14 +47,16 @@ export function buildProjectRailEntries(input: {
       membersByEnvironment.set(member.environmentId, members);
     }
     return [...membersByEnvironment].flatMap(([environmentId, members]) => {
-      const active = members.filter((member) => member.archivedAt == null);
-      if (active.length === 0) return [];
+      const representative = activeMachineProject(group, members);
+      if (!representative) return [];
       if (
         group.isScratch &&
-        !active.some((member) => sessionProjectKeys.has(`${environmentId}:${member.id}`))
+        !members.some(
+          (member) =>
+            member.archivedAt == null && sessionProjectKeys.has(`${environmentId}:${member.id}`),
+        )
       )
         return [];
-      const representative = active.find((member) => member.id === group.id) ?? active[0]!;
       const local = environmentId === input.primaryEnvironmentId;
       return [
         {

@@ -9,6 +9,8 @@ import {
   buildSidebarProjectSnapshots,
   resolveScopedProjectGroups,
   resolveSidebarProjectScopeKeys,
+  toggleSidebarProjectScope,
+  logicalSidebarProjectKey,
 } from "./sidebarProjectGrouping";
 import type { Project } from "./types";
 
@@ -130,4 +132,21 @@ describe("machine-scoped scratch scope keys", () => {
       [ordinary.projectKey, machineScopedProjectKey("\0no-project", localEnvironmentId)].sort(),
     );
   });
+});
+
+it("toggles a machine covered by a repository filter and preserves other projects", () => {
+  const [scratch] = groups().filter((group) => group.isScratch);
+  const group = scratch!;
+  const local = machineScopedProjectKey(group.projectKey, localEnvironmentId);
+  const remote = machineScopedProjectKey(group.projectKey, remoteEnvironmentId);
+  expect(
+    toggleSidebarProjectScope(["other", group.projectKey, remote], group, remoteEnvironmentId),
+  ).toEqual(["other", local]);
+  expect(toggleSidebarProjectScope(["other", local], group, remoteEnvironmentId)).toEqual([
+    "other",
+    local,
+    remote,
+  ]);
+  expect(toggleSidebarProjectScope(["other", local, remote], group)).toEqual(["other"]);
+  expect(logicalSidebarProjectKey(local)).toBe(group.projectKey);
 });

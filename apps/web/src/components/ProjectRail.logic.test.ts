@@ -138,6 +138,7 @@ describe("buildProjectRailEntries", () => {
       [localEnvironmentId, "b", "b"],
       [localEnvironmentId, "c", "c"],
       [localEnvironmentId, "d", "d"],
+      [remoteAEnvironmentId, "old-a", "a"],
       [remoteAEnvironmentId, "remote-a", "a"],
     ] as const;
     const groups = buildSidebarProjectSnapshots({
@@ -145,6 +146,7 @@ describe("buildProjectRailEntries", () => {
         environmentId,
         id: ProjectId.make(id),
         title: repository,
+        archivedAt: id === "old-a" ? "2026-02-01T00:00:00Z" : null,
         workspaceRoot: `/work/${id}`,
         repositoryIdentity: {
           canonicalKey: `github.com/test/${repository}`,
@@ -182,6 +184,10 @@ describe("buildProjectRailEntries", () => {
     });
     expect(keys).toEqual([remote.key]);
     expect(
+      resolveScopedProjectGroups({ groups, keys, primaryEnvironmentId: localEnvironmentId })[0]
+        ?.workspaceRoot,
+    ).toBe("/work/remote-a");
+    expect(
       resolveScopedProjectGroups({
         groups,
         keys,
@@ -206,7 +212,10 @@ describe("buildProjectRailEntries", () => {
       c: true,
       d: false,
     });
-    expect(visibility[remoteAEnvironmentId]?.visibility).toEqual({ "remote-a": true });
+    expect(visibility[remoteAEnvironmentId]?.visibility).toEqual({
+      "old-a": true,
+      "remote-a": true,
+    });
     expect(entries.filter((entry) => entry.environmentId === remoteAEnvironmentId)).toHaveLength(1);
     expect(entries.find((entry) => entry.environmentId === remoteAEnvironmentId)?.offline).toBe(
       true,

@@ -7,6 +7,7 @@ import {
   buildProjectGroups,
   derivePhysicalProjectKey,
   parseMachineScopedProjectKey,
+  machineScopedProjectKey,
   resolveScratchProjectScopeKey,
   type ProjectGroupingSettings,
 } from "@t3tools/client-runtime/state/project-grouping";
@@ -69,14 +70,54 @@ export interface SidebarProjectPickerEntry {
   isPreferred: boolean;
 }
 
+export function logicalSidebarProjectKey(key: string): string {
+  return parseMachineScopedProjectKey(key)?.projectKey ?? key;
+}
+
+export function toggleSidebarProjectScope(
+  keys: readonly string[],
+  group: SidebarProjectSnapshot,
+  environmentId?: EnvironmentId,
+): string[] {
+  const otherProjects = keys.filter((key) => logicalSidebarProjectKey(key) !== group.projectKey);
+  if (environmentId === undefined) {
+    return otherProjects.length === keys.length ? [...keys, group.projectKey] : otherProjects;
+  }
+  const machineKey = machineScopedProjectKey(group.projectKey, environmentId);
+  if (keys.includes(group.projectKey)) {
+    const remainingMachines = new Set(
+      group.memberProjects
+        .filter((member) => member.archivedAt == null && member.environmentId !== environmentId)
+        .map((member) => machineScopedProjectKey(group.projectKey, member.environmentId)),
+    );
+    return [...otherProjects, ...remainingMachines];
+  }
+  return keys.includes(machineKey)
+    ? keys.filter((key) => key !== machineKey)
+    : [...keys, machineKey];
+}
+
+export function activeMachineProject(
+  group: SidebarProjectSnapshot,
+  members: readonly SidebarProjectGroupMember[],
+) {
+  return (
+    members.find(
+      (member) =>
+        member.archivedAt == null &&
+        member.environmentId === group.environmentId &&
+        member.id === group.id,
+    ) ?? members.find((member) => member.archivedAt == null)
+  );
+}
+
 export function getSidebarProjectSettingsKey(
   group: SidebarProjectSnapshot,
   settings: ProjectGroupingSettings,
   projects: ReadonlyArray<Project>,
   projectRef?: ScopedProjectRef,
 ): string {
-  if (!group.isScratch)
-    return parseMachineScopedProjectKey(group.projectKey)?.projectKey ?? group.projectKey;
+  if (!group.isScratch) return logicalSidebarProjectKey(group.projectKey);
   const project =
     group.memberProjects.find(
       (member) =>
@@ -152,11 +193,8 @@ export function resolveScopedProjectGroups(input: {
       const memberProjects = group.memberProjects.filter(
         (member) => member.environmentId === environmentId,
       );
-      if (memberProjects.length === 0) return [];
-      const representative =
-        memberProjects.find(
-          (member) => member.environmentId === group.environmentId && member.id === group.id,
-        ) ?? memberProjects[0]!;
+      const representative = activeMachineProject(group, memberProjects);
+      if (!representative) return [];
       const environmentLabel = input.resolveEnvironmentLabel?.(environmentId) ?? null;
       return [
         {
