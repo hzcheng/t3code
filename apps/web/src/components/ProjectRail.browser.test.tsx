@@ -145,12 +145,7 @@ it("disables icons whose machine is offline and keeps the all-projects entry", a
       activityByProjectKey={new Map()}
       selectionByProjectKey={buildProjectRailSelection({
         selectedProjectKeys: entries.map((entry) => entry.group.projectKey),
-        entries: entries.map((entry) => ({
-          key: entry.key,
-          environmentId: entry.environmentId,
-          projectKey: entry.group.projectKey,
-          isScratch: entry.group.isScratch,
-        })),
+        entries,
       })}
       allProjectsSelected={false}
       onOpenAllProjects={onOpenAllProjects}
@@ -190,12 +185,7 @@ it("edits multiple visibility checkboxes without closing or changing thread scop
       activityByProjectKey={new Map()}
       selectionByProjectKey={buildProjectRailSelection({
         selectedProjectKeys: entries.map((entry) => entry.group.projectKey),
-        entries: entries.map((entry) => ({
-          key: entry.key,
-          environmentId: entry.environmentId,
-          projectKey: entry.group.projectKey,
-          isScratch: entry.group.isScratch,
-        })),
+        entries,
       })}
       allProjectsSelected={false}
       onOpenAllProjects={vi.fn()}

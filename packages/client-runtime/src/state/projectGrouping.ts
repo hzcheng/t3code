@@ -13,19 +13,18 @@ import { normalizeProjectPathForComparison } from "./projects.ts";
 
 const SCRATCH_PROJECT_SCOPE_KEY = "\0no-project";
 
-/**
- * Scope key for one machine's scratch project, so a client can filter to that
- * machine's "No project" threads without matching the logical all-machines group.
- */
-export function machineScopedScratchScopeKey(environmentId: EnvironmentId): string {
-  return `${SCRATCH_PROJECT_SCOPE_KEY}\0${environmentId}`;
+export function machineScopedProjectKey(projectKey: string, environmentId: EnvironmentId): string {
+  return `${projectKey}\0${environmentId}`;
 }
 
-export function parseMachineScopedScratchScopeKey(key: string): EnvironmentId | null {
-  const prefix = `${SCRATCH_PROJECT_SCOPE_KEY}\0`;
-  if (!key.startsWith(prefix)) return null;
-  const environmentId = key.slice(prefix.length);
-  return environmentId.length > 0 ? EnvironmentId.make(environmentId) : null;
+export function parseMachineScopedProjectKey(key: string) {
+  // The logical scratch key itself starts with NUL.
+  const separator = key.indexOf("\0", 1);
+  if (separator === -1 || separator === key.length - 1) return null;
+  return {
+    projectKey: key.slice(0, separator),
+    environmentId: EnvironmentId.make(key.slice(separator + 1)),
+  };
 }
 
 export interface ProjectGroupingSettings {

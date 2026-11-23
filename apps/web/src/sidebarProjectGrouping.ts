@@ -6,7 +6,8 @@ import type {
 import {
   buildProjectGroups,
   derivePhysicalProjectKey,
-  parseMachineScopedScratchScopeKey,
+  parseMachineScopedProjectKey,
+  machineScopedProjectKey,
   resolveScratchProjectScopeKey,
   type ProjectGroupingSettings,
 } from "@t3tools/client-runtime/state/project-grouping";
@@ -69,13 +70,54 @@ export interface SidebarProjectPickerEntry {
   isPreferred: boolean;
 }
 
+export function logicalSidebarProjectKey(key: string): string {
+  return parseMachineScopedProjectKey(key)?.projectKey ?? key;
+}
+
+export function toggleSidebarProjectScope(
+  keys: readonly string[],
+  group: SidebarProjectSnapshot,
+  environmentId?: EnvironmentId,
+): string[] {
+  const otherProjects = keys.filter((key) => logicalSidebarProjectKey(key) !== group.projectKey);
+  if (environmentId === undefined) {
+    return otherProjects.length === keys.length ? [...keys, group.projectKey] : otherProjects;
+  }
+  const machineKey = machineScopedProjectKey(group.projectKey, environmentId);
+  if (keys.includes(group.projectKey)) {
+    const remainingMachines = new Set(
+      group.memberProjects
+        .filter((member) => member.archivedAt == null && member.environmentId !== environmentId)
+        .map((member) => machineScopedProjectKey(group.projectKey, member.environmentId)),
+    );
+    return [...otherProjects, ...remainingMachines];
+  }
+  return keys.includes(machineKey)
+    ? keys.filter((key) => key !== machineKey)
+    : [...keys, machineKey];
+}
+
+export function activeMachineProject(
+  group: SidebarProjectSnapshot,
+  members: readonly SidebarProjectGroupMember[],
+) {
+  return (
+    members.find(
+      (member) =>
+        member.archivedAt == null &&
+        member.environmentId === group.environmentId &&
+        member.id === group.id,
+    ) ?? members.find((member) => member.archivedAt == null)
+  );
+}
+
 export function getSidebarProjectSettingsKey(
   group: SidebarProjectSnapshot,
   settings: ProjectGroupingSettings,
   projects: ReadonlyArray<Project>,
   projectRef?: ScopedProjectRef,
 ): string {
-  if (!group.isScratch) return group.projectKey;
+  if (!group.isScratch) return logicalSidebarProjectKey(group.projectKey);
   const project =
     group.memberProjects.find(
       (member) =>
@@ -97,14 +139,16 @@ export function resolveSidebarProjectScopeKey(input: {
   readonly canClearMissingScope?: boolean;
 }): string | null {
   if (input.key === null) return null;
-  const scratchEnvironmentId = parseMachineScopedScratchScopeKey(input.key);
-  if (scratchEnvironmentId !== null) {
-    const hasScratchMember = input.groups.some(
+  const scope = parseMachineScopedProjectKey(input.key);
+  if (scope !== null) {
+    const hasMember = input.groups.some(
       (candidate) =>
-        candidate.isScratch &&
-        candidate.memberProjects.some((member) => member.environmentId === scratchEnvironmentId),
+        candidate.projectKey === scope.projectKey &&
+        candidate.memberProjects.some(
+          (member) => member.environmentId === scope.environmentId && member.archivedAt == null,
+        ),
     );
-    return hasScratchMember || !input.canClearMissingScope ? input.key : null;
+    return hasMember || !input.canClearMissingScope ? input.key : null;
   }
   const group =
     input.groups.find((candidate) => candidate.projectKey === input.key) ??
@@ -129,7 +173,7 @@ export function resolveSidebarProjectScopeKeys(input: {
 }
 
 /**
- * The snapshots a persisted scope selects. A machine-qualified scratch key
+ * The snapshots a persisted scope selects. A machine-qualified key
  * yields a snapshot holding only that machine's members, so thread filtering,
  * search and folder scoping stay on that machine.
  */
@@ -142,18 +186,15 @@ export function resolveScopedProjectGroups(input: {
   const keys = new Set(input.keys);
   return input.groups.flatMap((group) => {
     if (keys.has(group.projectKey)) return [group];
-    if (!group.isScratch) return [];
     return [...keys].flatMap((key) => {
-      const environmentId = parseMachineScopedScratchScopeKey(key);
-      if (environmentId === null) return [];
+      const scope = parseMachineScopedProjectKey(key);
+      if (scope?.projectKey !== group.projectKey) return [];
+      const { environmentId } = scope;
       const memberProjects = group.memberProjects.filter(
         (member) => member.environmentId === environmentId,
       );
-      if (memberProjects.length === 0) return [];
-      const representative =
-        memberProjects.find(
-          (member) => member.environmentId === group.environmentId && member.id === group.id,
-        ) ?? memberProjects[0]!;
+      const representative = activeMachineProject(group, memberProjects);
+      if (!representative) return [];
       const environmentLabel = input.resolveEnvironmentLabel?.(environmentId) ?? null;
       return [
         {

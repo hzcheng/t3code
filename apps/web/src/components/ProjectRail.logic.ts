@@ -1,6 +1,10 @@
 import type { EnvironmentId, ProjectId, ScopedProjectRef } from "@t3tools/contracts";
-import { machineScopedScratchScopeKey } from "@t3tools/client-runtime/state/project-grouping";
-import type { SidebarProjectSnapshot, SidebarProjectGroupMember } from "../sidebarProjectGrouping";
+import { machineScopedProjectKey } from "@t3tools/client-runtime/state/project-grouping";
+import {
+  activeMachineProject,
+  type SidebarProjectSnapshot,
+  type SidebarProjectGroupMember,
+} from "../sidebarProjectGrouping";
 
 export interface ProjectRailGroupShape {
   readonly projectKey: string;
@@ -43,14 +47,16 @@ export function buildProjectRailEntries(input: {
       membersByEnvironment.set(member.environmentId, members);
     }
     return [...membersByEnvironment].flatMap(([environmentId, members]) => {
-      const active = members.filter((member) => member.archivedAt == null);
-      if (active.length === 0) return [];
+      const representative = activeMachineProject(group, members);
+      if (!representative) return [];
       if (
         group.isScratch &&
-        !active.some((member) => sessionProjectKeys.has(`${environmentId}:${member.id}`))
+        !members.some(
+          (member) =>
+            member.archivedAt == null && sessionProjectKeys.has(`${environmentId}:${member.id}`),
+        )
       )
         return [];
-      const representative = active.find((member) => member.id === group.id) ?? active[0]!;
       const local = environmentId === input.primaryEnvironmentId;
       return [
         {
@@ -91,7 +97,7 @@ export function buildProjectRailEntries(input: {
 
   return ordered.map(({ group }, orderedIndex) => ({
     group,
-    key: JSON.stringify([group.environmentId, group.projectKey]),
+    key: machineScopedProjectKey(group.projectKey, group.environmentId),
     environmentId: group.environmentId,
     environmentLabel: input.environmentLabelById.get(group.environmentId) ?? null,
     offline: !input.onlineEnvironmentIds.has(group.environmentId),
@@ -201,28 +207,18 @@ export function buildProjectRailActivity(input: {
 
 export type ProjectRailSelection = "single" | "multi";
 
-/**
- * Selection state per rail entry (keyed by entry key). A machine-qualified
- * scratch scope marks only that machine's No project; the logical scratch
- * scope marks every machine's.
- */
 export function buildProjectRailSelection(input: {
   readonly selectedProjectKeys: readonly string[];
   readonly entries: ReadonlyArray<{
     readonly key: string;
-    readonly environmentId: EnvironmentId;
-    readonly projectKey: string;
-    readonly isScratch?: boolean | undefined;
+    readonly group: { readonly projectKey: string };
   }>;
 }): ReadonlyMap<string, ProjectRailSelection> {
   const selected = new Set(input.selectedProjectKeys);
   const kind: ProjectRailSelection = input.selectedProjectKeys.length > 1 ? "multi" : "single";
   const map = new Map<string, ProjectRailSelection>();
   for (const entry of input.entries) {
-    if (
-      selected.has(entry.projectKey) ||
-      (entry.isScratch === true && selected.has(machineScopedScratchScopeKey(entry.environmentId)))
-    ) {
+    if (selected.has(entry.group.projectKey) || selected.has(entry.key)) {
       map.set(entry.key, kind);
     }
   }

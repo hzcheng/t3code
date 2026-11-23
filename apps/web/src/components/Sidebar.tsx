@@ -108,13 +108,13 @@ import { configuredHostedAppUrl } from "../hostedPairing";
 import { useSidebarPendingFileDropStore } from "../sidebarPendingFileDropStore";
 import { SidebarFolderDrop } from "./sidebar/SidebarFolderDrop";
 import {
-  machineScopedScratchScopeKey,
-  parseMachineScopedScratchScopeKey,
   pickableProjectGroups,
   selectProjectGroupingSettings,
 } from "@t3tools/client-runtime/state/project-grouping";
 import {
   projectGroupsSpanEnvironments,
+  toggleSidebarProjectScope,
+  logicalSidebarProjectKey,
   resolveScopedProjectGroups,
   resolveSidebarProjectScopeKeys,
   getSidebarProjectSettingsKey,
@@ -1148,12 +1148,12 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
   });
   const projectScopeKeys = revealWidensScope ? [] : chosenProjectScopeKeys;
   const projectScopeKey = projectScopeKeys.length === 0 ? null : projectScopeKeys.join("\n");
-  const toggleProjectScopeKey = (key: string) =>
-    setProjectScopeKeys(
-      projectScopeKeys.includes(key)
-        ? projectScopeKeys.filter((candidate) => candidate !== key)
-        : [...projectScopeKeys, key],
-    );
+  const selectedLogicalProjectKeys = new Set(projectScopeKeys.map(logicalSidebarProjectKey));
+  const toggleProjectScopeKey = (key: string, environmentId?: EnvironmentId) => {
+    const group = projectGroupByScopeKey.get(key);
+    if (group)
+      setProjectScopeKeys(toggleSidebarProjectScope(projectScopeKeys, group, environmentId));
+  };
   // The widened scope outlives the reveal, so it is written back to the persisted
   // scope. Route changes arrive from history, links and the palette, and only this
   // component holds the project groups that decide a widening, so no single
@@ -1185,16 +1185,12 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     (item) => item.value,
     projectScopeMenuState.open,
   );
+  const firstScopeKey = projectScopeKeys[0] ?? "all";
+  const pickerKey = logicalSidebarProjectKey(firstScopeKey);
   const selectedProjectScopeItem =
     projectScopeKeys.length > 1
       ? null
-      : (projectScopeItems.find((item) => item.value === (projectScopeKeys[0] ?? "all")) ??
-        // A machine-qualified scratch scope displays through the logical No project item.
-        (parseMachineScopedScratchScopeKey(projectScopeKeys[0] ?? "") !== null
-          ? (projectScopeItems.find(
-              (item) => item.value === scopeGroups.find((group) => group.isScratch)?.projectKey,
-            ) ?? projectScopeItems[0]!)
-          : projectScopeItems[0]!));
+      : (projectScopeItems.find((item) => item.value === pickerKey) ?? projectScopeItems[0]!);
   const filteredProjectScopeItems = filterSidebarProjectScopeItems({
     items: projectScopeItems,
     query: projectScopeMenuState.query,
@@ -1332,22 +1328,14 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
   });
   const railSelectionByProjectKey = buildProjectRailSelection({
     selectedProjectKeys: chosenProjectScopeKeys,
-    entries: railEntries.map((entry) => ({
-      key: entry.key,
-      environmentId: entry.environmentId,
-      projectKey: entry.group.projectKey,
-      isScratch: entry.group.isScratch,
-    })),
+    entries: railEntries,
   });
   const openProjectGroupFromRail = useStableCallback(
     (entry: (typeof railEntries)[number], additive: boolean) => {
       const group = entry.group;
-      // Scratch groups span machines logically; the rail scopes one machine.
-      const scopeKey = group.isScratch
-        ? machineScopedScratchScopeKey(entry.environmentId)
-        : group.projectKey;
+      const scopeKey = entry.key;
       if (additive) {
-        toggleProjectScopeKey(scopeKey);
+        toggleProjectScopeKey(group.projectKey, entry.environmentId);
         return;
       }
       if (!(chosenProjectScopeKeys.length === 1 && chosenProjectScopeKeys[0] === scopeKey)) {
@@ -1402,8 +1390,8 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
       source: ContextMenuSource,
       fromRail = false,
     ) => {
-      const pinGroup =
-        projectGroups.find((candidate) => candidate.projectKey === group.projectKey) ?? group;
+      const logicalKey = logicalSidebarProjectKey(group.projectKey);
+      const pinGroup = projectGroupByScopeKey.get(logicalKey) ?? group;
       const api = readLocalApi();
       if (!api) return;
       const newThreadShortcut = shortcutLabelForCommand(keybindings, "chat.new");
@@ -2790,6 +2778,8 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                 projectRef.projectId === thread.projectId,
             ),
           ) ?? null;
+        const threadProjectIsSelected =
+          scopedProjectKeys?.has(`${thread.environmentId}:${thread.projectId}`) === true;
         const clicked = await settlePromise(() =>
           api.contextMenu.show(
             buildThreadActionMenuItems({
@@ -2803,7 +2793,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                 threadProjectGroup && !threadProjectGroup.archived
                   ? {
                       label: threadProjectGroup.displayName,
-                      isActive: projectScopeKeys.includes(threadProjectGroup.projectKey),
+                      isActive: threadProjectIsSelected,
                     }
                   : null,
               isPinned,
@@ -2848,11 +2838,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
         switch (clicked.value) {
           case "filter-by-project":
             if (threadProjectGroup) {
-              setProjectScopeKeys(
-                projectScopeKeys.includes(threadProjectGroup.projectKey)
-                  ? []
-                  : [threadProjectGroup.projectKey],
-              );
+              setProjectScopeKeys(threadProjectIsSelected ? [] : [threadProjectGroup.projectKey]);
             }
             return;
           case "project-settings":
@@ -3109,8 +3095,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
           ? railEntries.find(
               (entry) =>
                 entry.group.projectKey === chosenProjectScopeKeys[0] ||
-                (entry.group.isScratch &&
-                  machineScopedScratchScopeKey(entry.environmentId) === chosenProjectScopeKeys[0]),
+                entry.key === chosenProjectScopeKeys[0],
             )
           : undefined);
       const targetProjectKey = resolveAdjacentProjectKey({
@@ -3334,7 +3319,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                           {(item: (typeof projectScopeItems)[number]) => {
                             const project = projectGroupByScopeKey.get(item.value) ?? null;
                             const isSelected = project
-                              ? projectScopeKeys.includes(item.value)
+                              ? selectedLogicalProjectKeys.has(item.value)
                               : projectScopeKeys.length === 0;
                             return (
                               <ComboboxItem

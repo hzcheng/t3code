@@ -1,7 +1,7 @@
 import { EnvironmentId, ProjectId } from "@t3tools/contracts";
 import {
-  machineScopedScratchScopeKey,
-  parseMachineScopedScratchScopeKey,
+  machineScopedProjectKey,
+  parseMachineScopedProjectKey,
 } from "@t3tools/client-runtime/state/project-grouping";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -9,6 +9,8 @@ import {
   buildSidebarProjectSnapshots,
   resolveScopedProjectGroups,
   resolveSidebarProjectScopeKeys,
+  toggleSidebarProjectScope,
+  logicalSidebarProjectKey,
 } from "./sidebarProjectGrouping";
 import type { Project } from "./types";
 
@@ -61,22 +63,22 @@ function groups() {
 
 describe("machine-scoped scratch scope keys", () => {
   it("round-trips the environment id", () => {
-    const key = machineScopedScratchScopeKey(remoteEnvironmentId);
-    expect(parseMachineScopedScratchScopeKey(key)).toBe(remoteEnvironmentId);
+    const key = machineScopedProjectKey("\0no-project", remoteEnvironmentId);
+    expect(parseMachineScopedProjectKey(key)?.environmentId).toBe(remoteEnvironmentId);
     // The logical all-machines key and ordinary keys stay unqualified.
-    expect(parseMachineScopedScratchScopeKey("\0no-project")).toBeNull();
-    expect(parseMachineScopedScratchScopeKey("app")).toBeNull();
+    expect(parseMachineScopedProjectKey("\0no-project")).toBeNull();
+    expect(parseMachineScopedProjectKey("app")).toBeNull();
   });
 
   it("keeps a machine-scoped scratch key while its machine has a scratch project", () => {
-    const key = machineScopedScratchScopeKey(remoteEnvironmentId);
+    const key = machineScopedProjectKey("\0no-project", remoteEnvironmentId);
     expect(
       resolveSidebarProjectScopeKeys({ groups: groups(), keys: [key], canClearMissingScope: true }),
     ).toEqual([key]);
   });
 
   it("clears a machine-scoped scratch key once that machine has no scratch project", () => {
-    const key = machineScopedScratchScopeKey(EnvironmentId.make("env-gone"));
+    const key = machineScopedProjectKey("\0no-project", EnvironmentId.make("env-gone"));
     expect(
       resolveSidebarProjectScopeKeys({ groups: groups(), keys: [key], canClearMissingScope: true }),
     ).toEqual([]);
@@ -90,7 +92,7 @@ describe("machine-scoped scratch scope keys", () => {
   });
 
   it("scopes thread filtering to the selected machine's scratch members", () => {
-    const key = machineScopedScratchScopeKey(remoteEnvironmentId);
+    const key = machineScopedProjectKey("\0no-project", remoteEnvironmentId);
     const selected = resolveScopedProjectGroups({
       groups: groups(),
       keys: [key],
@@ -123,11 +125,28 @@ describe("machine-scoped scratch scope keys", () => {
     const ordinary = groups().find((group) => !group.isScratch)!;
     const selected = resolveScopedProjectGroups({
       groups: groups(),
-      keys: [ordinary.projectKey, machineScopedScratchScopeKey(localEnvironmentId)],
+      keys: [ordinary.projectKey, machineScopedProjectKey("\0no-project", localEnvironmentId)],
       primaryEnvironmentId: localEnvironmentId,
     });
     expect(selected.map((group) => group.projectKey).sort()).toEqual(
-      [ordinary.projectKey, machineScopedScratchScopeKey(localEnvironmentId)].sort(),
+      [ordinary.projectKey, machineScopedProjectKey("\0no-project", localEnvironmentId)].sort(),
     );
   });
+});
+
+it("toggles a machine covered by a repository filter and preserves other projects", () => {
+  const [scratch] = groups().filter((group) => group.isScratch);
+  const group = scratch!;
+  const local = machineScopedProjectKey(group.projectKey, localEnvironmentId);
+  const remote = machineScopedProjectKey(group.projectKey, remoteEnvironmentId);
+  expect(
+    toggleSidebarProjectScope(["other", group.projectKey, remote], group, remoteEnvironmentId),
+  ).toEqual(["other", local]);
+  expect(toggleSidebarProjectScope(["other", local], group, remoteEnvironmentId)).toEqual([
+    "other",
+    local,
+    remote,
+  ]);
+  expect(toggleSidebarProjectScope(["other", local, remote], group)).toEqual(["other"]);
+  expect(logicalSidebarProjectKey(local)).toBe(group.projectKey);
 });

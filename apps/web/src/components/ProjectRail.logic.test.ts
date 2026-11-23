@@ -1,7 +1,9 @@
 import { EnvironmentId, ProjectId, SourceControlProviderKind } from "@t3tools/contracts";
-import { machineScopedScratchScopeKey } from "@t3tools/client-runtime/state/project-grouping";
+import { machineScopedProjectKey } from "@t3tools/client-runtime/state/project-grouping";
 import {
   buildSidebarProjectSnapshots,
+  resolveScopedProjectGroups,
+  resolveSidebarProjectScopeKeys,
   type SidebarProjectSnapshot,
 } from "../sidebarProjectGrouping";
 import { reconcileProjectRailVisibility } from "../projectRailStore";
@@ -136,6 +138,7 @@ describe("buildProjectRailEntries", () => {
       [localEnvironmentId, "b", "b"],
       [localEnvironmentId, "c", "c"],
       [localEnvironmentId, "d", "d"],
+      [remoteAEnvironmentId, "old-a", "a"],
       [remoteAEnvironmentId, "remote-a", "a"],
     ] as const;
     const groups = buildSidebarProjectSnapshots({
@@ -143,6 +146,7 @@ describe("buildProjectRailEntries", () => {
         environmentId,
         id: ProjectId.make(id),
         title: repository,
+        archivedAt: id === "old-a" ? "2026-02-01T00:00:00Z" : null,
         workspaceRoot: `/work/${id}`,
         repositoryIdentity: {
           canonicalKey: `github.com/test/${repository}`,
@@ -172,6 +176,30 @@ describe("buildProjectRailEntries", () => {
       environmentLabelById,
       sessionProjectRefs: [],
     });
+    const remote = entries.find((entry) => entry.environmentId === remoteAEnvironmentId)!;
+    const keys = resolveSidebarProjectScopeKeys({
+      groups,
+      keys: [remote.key],
+      canClearMissingScope: true,
+    });
+    expect(keys).toEqual([remote.key]);
+    expect(
+      resolveScopedProjectGroups({ groups, keys, primaryEnvironmentId: localEnvironmentId })[0]
+        ?.workspaceRoot,
+    ).toBe("/work/remote-a");
+    expect(
+      resolveScopedProjectGroups({
+        groups,
+        keys,
+        primaryEnvironmentId: localEnvironmentId,
+      }).flatMap((group) => group.memberProjectRefs),
+    ).toEqual(remote.group.memberProjectRefs);
+    expect([
+      ...buildProjectRailSelection({
+        selectedProjectKeys: keys,
+        entries,
+      }),
+    ]).toEqual([[remote.key, "single"]]);
     const visibility = reconcileProjectRailVisibility(
       {},
       entries.map((entry) => entry.group),
@@ -184,7 +212,10 @@ describe("buildProjectRailEntries", () => {
       c: true,
       d: false,
     });
-    expect(visibility[remoteAEnvironmentId]?.visibility).toEqual({ "remote-a": true });
+    expect(visibility[remoteAEnvironmentId]?.visibility).toEqual({
+      "old-a": true,
+      "remote-a": true,
+    });
     expect(entries.filter((entry) => entry.environmentId === remoteAEnvironmentId)).toHaveLength(1);
     expect(entries.find((entry) => entry.environmentId === remoteAEnvironmentId)?.offline).toBe(
       true,
@@ -347,12 +378,7 @@ describe("buildProjectRailActivity", () => {
 });
 
 describe("buildProjectRailSelection", () => {
-  const selectionEntry = (key: string, projectKey: string, overrides = {}) => ({
-    key,
-    environmentId: localEnvironmentId,
-    projectKey,
-    ...overrides,
-  });
+  const selectionEntry = (key: string, projectKey: string) => ({ key, group: { projectKey } });
 
   it("marks a single selected key as single and several as multi", () => {
     const single = buildProjectRailSelection({
@@ -369,23 +395,26 @@ describe("buildProjectRailSelection", () => {
   });
 
   it("scopes a machine-qualified scratch selection to that machine's entry", () => {
-    const local = selectionEntry("local-scratch", "\0no-project", { isScratch: true });
-    const remote = selectionEntry("remote-scratch", "\0no-project", {
-      isScratch: true,
-      environmentId: remoteAEnvironmentId,
-    });
+    const local = selectionEntry(
+      machineScopedProjectKey("\0no-project", localEnvironmentId),
+      "\0no-project",
+    );
+    const remote = selectionEntry(
+      machineScopedProjectKey("\0no-project", remoteAEnvironmentId),
+      "\0no-project",
+    );
     const machineScoped = buildProjectRailSelection({
-      selectedProjectKeys: [machineScopedScratchScopeKey(remoteAEnvironmentId)],
+      selectedProjectKeys: [remote.key],
       entries: [local, remote],
     });
-    expect(machineScoped.get("remote-scratch")).toBe("single");
-    expect(machineScoped.has("local-scratch")).toBe(false);
+    expect(machineScoped.get(remote.key)).toBe("single");
+    expect(machineScoped.has(local.key)).toBe(false);
     const logical = buildProjectRailSelection({
       selectedProjectKeys: ["\0no-project"],
       entries: [local, remote],
     });
-    expect(logical.get("local-scratch")).toBe("single");
-    expect(logical.get("remote-scratch")).toBe("single");
+    expect(logical.get(local.key)).toBe("single");
+    expect(logical.get(remote.key)).toBe("single");
   });
 });
 
